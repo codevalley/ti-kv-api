@@ -12,48 +12,92 @@ This project provides a simple API to interact with TiKV, a distributed transact
 
 ## Installation
 
-1. Clone the repository:
-   ```bash
-   git clone <repository-url>
-2. Navigate to the project directory
-    ```cd tikvapi
-3. Use Docker Compose to build and start the services:
-    ```docker-compose up --build
+Make sure you have the necessary frameworks and tools required to run the project.
 
-## Usage of API
+* [Go installation](https://go.dev/doc/install)
+* [Docker installation](https://docs.docker.com/desktop/) 
+
+1. Clone the repository:
+
+   ```bash
+   git clone https://github.com/codevalley/ti-kv-api.git
+
+2. Navigate to the project directory, and execute docker build
+    ```cd tikvapi
+    cd ti-kv-api
+    docker build -t tikvapi .
+    ```
+
+3. Use Docker Compose to build and start the services
+
+    ```shell
+    docker-compose up
+    ```
+
+4. Your application can now be accessed at `http://localhost:8080`
+
+5. To stop all services and remove associated containers, you can run
+
+    ```docker-compose up --build
+    docker-compose down
+    ```
+
+## Usage
 ### Add a new blob
 Add a new blob to the KV Store
-```curl -X POST "http://localhost:8080/?quote=HelloWorld"
+
+```
+curl -X POST "http://localhost:8080/?blob=HelloWorld"
+curl -X POST "http://localhost:8080/?blob=ByeUniverse"
+curl -X POST "http://localhost:8080/?blob=GreetingsEarth"
+```
 
 ### Delete a blob
 Delete a specific blob from the KV Store
-```curl -X DELETE "http://localhost:8080/?quote=To%20be%20or%20not%20to%20be%2C%20that%20is%20the%20question."
+
+```
+curl -X DELETE "http://localhost:8080/?blob=ByeUniverse"
+```
 
 ### Update a blob
 Update a specific blob from the KV Store
-```curl -X PUT "http://localhost:8080/?oldBlob=To%20be%20or%20not%20to%20be%2C%20that%20is%20the%20question.&newBlob=To%20be%20or%20not%20to%20be%2C%20that%20is%20the%20answer."
 
-### Get the Number of Blobs
-Retrieve the number of blobs in the KV store.
-```curl "http://localhost:8080/blobs/count"
+```
+curl -X PUT "http://localhost:8080/?oldBlob=HelloWorld&newBlob=HelloMultiverse"
+```
 
-### Retrieve a Random Blob
-Get a random blob from the KV store..
-```curl "http://localhost:8080/blobs/random"
+### Get the blob count
 
-### Retrieve all Blobs
-Get all blobs from the KV Store.
-```curl "http://localhost:8080/blobs/all"
+[Todo] Retrieve the number of blobs in the KV store.
+
+```
+curl "http://localhost:8080/blobs/count"
+```
+
+### Retreive a random blob
+
+Retrieve a random entry from the KV store.
+
+```
+curl "http://localhost:8080/blobs/random"
+```
+
+### Retreive all blobs
+
+[Todo] Retrieve all the blobs from the KV store.
+
+```
+curl "http://localhost:8080/blobs/all"
+```
 
 ## Maintainers
-Narayan (@codevalley)
+
+Narayan ([@codevalley](https://github.com/codevalley))
 
 ## Contributing
+
 We welcome contributions to this project. Please open an issue or submit a pull request on GitHub!
 
 ## License
-This project is licensed under the MIT License. See the LICENSE file for details.
 
-
-
-
+This project is licensed under the MIT License. See the [LICENSE](https://github.com/codevalley/ti-kv-api/blob/master/LICENSE.md) file for details.
