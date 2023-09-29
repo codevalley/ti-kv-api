@@ -14,6 +14,8 @@ services:
     ports:
       - "2379:2379"
       - "2380:2380"
+    volumes:
+      - pd-data:/pd
 
   tikv-server:
     image: tikv/tikv:latest
@@ -21,8 +23,11 @@ services:
       - --pd=pd-server:2379
       - --addr=0.0.0.0:20160
       - --advertise-addr=tikv-server:20160
+      - --data-dir=/tikv  # Assumed data directory for TiKV, adjust if needed
     ports:
       - "20160:20160"
+    volumes:
+      - tikv-data:/tikv  # Assuming /tikv is the data directory inside the container, adjust if needed
     depends_on:
       - pd-server
 
@@ -32,3 +37,7 @@ services:
       - "8080:8080"
     depends_on:
       - tikv-server
+
+volumes:
+  tikv-data:
+  pd-data:

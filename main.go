@@ -91,23 +91,36 @@ func init() {
 // creates a pool of TiKV clients, and handles HTTP requests for retrieving, saving, and deleting blobs.
 // It uses the rawkv package to interact with TiKV.
 func main() {
-	// Set up logging
+	setupLogging()
+	setupMonitoring()
+
+	clientPool := setupClientPool()
+
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		handleRequest(w, r, clientPool)
+	})
+
+	log.Fatal(http.ListenAndServe(":8080", nil))
+}
+
+func setupLogging() *log.Logger {
 	logFile, err := os.OpenFile("tikvApi.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		log.Fatalf("Failed to open log file: %v", err)
 	}
-	defer logFile.Close()
-	logger := log.New(logFile, "", log.LstdFlags)
+	return log.New(logFile, "", log.LstdFlags)
+}
 
-	// Set up monitoring
+func setupMonitoring() {
 	go func() {
 		for {
 			time.Sleep(30 * time.Second)
-			logger.Printf("Number of keys in TiKV: %d", countBlobs())
+			log.Printf("Number of keys in TiKV: %d", countBlobs())
 		}
 	}()
+}
 
-	// Create a pool of TiKV clients
+func setupClientPool() chan *rawkv.Client {
 	clientPoolSize := 10
 	clientPool := make(chan *rawkv.Client, clientPoolSize)
 	for i := 0; i < clientPoolSize; i++ {
@@ -117,230 +130,291 @@ func main() {
 		}
 		clientPool <- client
 	}
+	return clientPool
+}
 
-	// Handle requests
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		// Get a client from the pool
-		client := <-clientPool
-		defer func() {
-			// Put the client back into the pool
-			clientPool <- client
-		}()
+func handleRequest(w http.ResponseWriter, r *http.Request, clientPool chan *rawkv.Client) {
+	client := <-clientPool
+	defer func() {
+		clientPool <- client
+	}()
 
-		switch r.Method {
-		case http.MethodGet:
-			// Retrieve a random blob if no blob is provided
-			keys, _, err := client.Scan(r.Context(), []byte("blob:"), []byte("blob:~"), 100)
-			if err != nil {
-				http.Error(w, "Failed to retrieve blobs", http.StatusInternalServerError)
-				log.Printf("Failed to retrieve blobs: %v", err)
-				return
-			}
-			if len(keys) == 0 {
-				http.Error(w, "No blobs found", http.StatusNotFound)
-				log.Println("No blobs found")
-				return
-			}
+	switch r.Method {
+	case http.MethodGet:
+		handleGET(w, r, client)
+	case http.MethodPost:
+		handlePOST(w, r, client)
+	case http.MethodDelete:
+		handleDELETE(w, r, client)
+	case http.MethodPut:
+		handlePUT(w, r, client)
+	default:
+		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
+		log.Println("Invalid request method")
+		return
+	}
+}
 
-			// Use local random generator to select a random blob
-			randGen := rand.New(rand.NewSource(time.Now().UnixNano()))
-			// TODO: Local random generator is not truly random
-			randGen.Seed(randGen.Int63())
-			randomIndex := randGen.Intn(len(keys))
-			randomKey := keys[randomIndex]
-			value, err := client.Get(r.Context(), randomKey)
-			if err != nil {
-				http.Error(w, "Failed to retrieve blob", http.StatusInternalServerError)
-				log.Printf("Failed to retrieve blob: %v", err)
-				return
-			}
-			blob := string(value)
+// Further break down each HTTP method handler into its own function, e.g.:
 
-			// Return the blob (either provided or retrieved) as JSON
-			resp := map[string]string{"blob": blob}
-			jsonResp, err := json.Marshal(resp)
-			if err != nil {
-				http.Error(w, "Failed to marshal response", http.StatusInternalServerError)
-				log.Printf("Failed to marshal response: %v", err)
-				return
-			}
-			w.Header().Set("Content-Type", "application/json")
-			w.Write(jsonResp)
-			// TODO: Code does not handle errors in tiKV operations
-		case http.MethodPost:
-			// Save the blob to TiKV
-			blob := r.URL.Query().Get("blob")
-			if blob == "" {
-				http.Error(w, "No blob provided", http.StatusBadRequest)
-				log.Println("No blob provided")
-				return
-			}
+func handleGET(w http.ResponseWriter, r *http.Request, client *rawkv.Client) {
+	action := r.URL.Query().Get("action")
+	log.Printf("Action: %v", action)
+	if action == "count" {
+		handleGETCount(w, client)
+	} else if action == "all" {
+		handleGETAll(w, r, client)
+	} else {
+		handleGETRandom(w, r, client)
+	}
 
-			// Check if the blob already exists
-			keys, _, err := client.Scan(r.Context(), []byte("blob:"), []byte("blob:~"), 100)
-			if err != nil {
-				http.Error(w, "Failed to retrieve blobs", http.StatusInternalServerError)
-				log.Printf("Failed to retrieve blobs: %v", err)
-				return
-			}
-			for _, key := range keys {
-				value, err := client.Get(r.Context(), key)
-				if err != nil {
-					http.Error(w, "Failed to retrieve blob", http.StatusInternalServerError)
-					log.Printf("Failed to retrieve blob: %v", err)
-					return
-				}
-				if string(value) == blob {
-					http.Error(w, "Blob already exists", http.StatusConflict)
-					log.Println("Blob already exists")
-					return
-				}
-			}
+}
+func handleGETCount(w http.ResponseWriter, client *rawkv.Client) {
+	count := countBlobs()
+	resp := map[string]int{"count": count}
+	jsonResp, err := json.Marshal(resp)
+	if err != nil {
+		http.Error(w, "Failed to marshal response", http.StatusInternalServerError)
+		log.Printf("Failed to marshal response: %v", err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(jsonResp)
+}
 
-			key := fmt.Sprintf("blob:%d", time.Now().UnixNano())
-			err = client.Put(r.Context(), []byte(key), []byte(blob))
-			if err != nil {
-				http.Error(w, "Failed to save blob", http.StatusInternalServerError)
-				log.Printf("Failed to save blob: %v", err)
-				return
-			}
-			if err != nil {
-				http.Error(w, "Failed to save blob", http.StatusInternalServerError)
-				log.Printf("Failed to save blob: %v", err)
-				return
-			}
+func handleGETAll(w http.ResponseWriter, r *http.Request, client *rawkv.Client) {
+	keys, _, err := client.Scan(r.Context(), []byte("blob:"), []byte("blob:~"), 100)
+	if err != nil {
+		http.Error(w, "Failed to retrieve blobs", http.StatusInternalServerError)
+		log.Printf("Failed to retrieve blobs: %v", err)
+		return
+	}
+	if len(keys) == 0 {
+		http.Error(w, "No blobs found", http.StatusNotFound)
+		log.Println("No blobs found")
+		return
+	}
 
-			// Return the saved blob as JSON
-			resp := map[string]string{"blob": blob}
-			jsonResp, err := json.Marshal(resp)
-			if err != nil {
-				http.Error(w, "Failed to marshal response", http.StatusInternalServerError)
-				log.Printf("Failed to marshal response: %v", err)
-				return
-			}
-			w.Header().Set("Content-Type", "application/json")
-			w.Write(jsonResp)
-			// TODO: Code does not handle errors in tiKV operations
-		case http.MethodDelete:
-			// Delete the blob from TiKV
-			blob := r.URL.Query().Get("blob")
-			if blob == "" {
-				http.Error(w, "No blob provided", http.StatusBadRequest)
-				log.Println("No blob provided")
-				return
-			}
-
-			keys, _, err := client.Scan(r.Context(), []byte("blob:"), []byte("blob:~"), 100)
-			if err != nil {
-				http.Error(w, "Failed to retrieve blobs", http.StatusInternalServerError)
-				log.Printf("Failed to retrieve blobs: %v", err)
-				return
-			}
-			var keyToDelete []byte
-			for _, key := range keys {
-				value, err := client.Get(r.Context(), key)
-				if err != nil {
-					http.Error(w, "Failed to retrieve blob", http.StatusInternalServerError)
-					log.Printf("Failed to retrieve blob: %v", err)
-					return
-				}
-				if string(value) == blob {
-					keyToDelete = key
-					break
-				}
-			}
-
-			if keyToDelete == nil {
-				http.Error(w, "Blob not found", http.StatusNotFound)
-				log.Println("Blob not found")
-				return
-			}
-
-			err = client.Delete(r.Context(), keyToDelete)
-			if err != nil {
-				http.Error(w, "Failed to delete blob", http.StatusInternalServerError)
-				log.Printf("Failed to delete blob: %v", err)
-				return
-			}
-
-			// Return success message as JSON
-			resp := map[string]string{"message": "Blob deleted successfully"}
-			jsonResp, err := json.Marshal(resp)
-			if err != nil {
-				http.Error(w, "Failed to marshal response", http.StatusInternalServerError)
-				log.Printf("Failed to marshal response: %v", err)
-				return
-			}
-			w.Header().Set("Content-Type", "application/json")
-			w.Write(jsonResp)
-			// TODO: Code does not handle errors in tiKV operations
-		case http.MethodPut:
-			// Update the blob in TiKV
-			oldBlob := r.URL.Query().Get("oldBlob")
-			if oldBlob == "" {
-				http.Error(w, "No old blob provided", http.StatusBadRequest)
-				log.Println("No old blob provided")
-				return
-			}
-			newBlob := r.URL.Query().Get("newBlob")
-			if newBlob == "" {
-				http.Error(w, "No new blob provided", http.StatusBadRequest)
-				log.Println("No new blob provided")
-				return
-			}
-
-			keys, _, err := client.Scan(r.Context(), []byte("blob:"), []byte("blob:~"), 100)
-			if err != nil {
-				http.Error(w, "Failed to retrieve blobs", http.StatusInternalServerError)
-				log.Printf("Failed to retrieve blobs: %v", err)
-				return
-			}
-			var keyToUpdate []byte
-			for _, key := range keys {
-				value, err := client.Get(r.Context(), key)
-				if err != nil {
-					http.Error(w, "Failed to retrieve blob", http.StatusInternalServerError)
-					log.Printf("Failed to retrieve blob: %v", err)
-					return
-				}
-				if string(value) == oldBlob {
-					keyToUpdate = key
-					break
-				}
-			}
-
-			if keyToUpdate == nil {
-				http.Error(w, "Blob not found", http.StatusNotFound)
-				log.Println("Blob not found")
-				return
-			}
-
-			err = client.Put(r.Context(), keyToUpdate, []byte(newBlob))
-			if err != nil {
-				http.Error(w, "Failed to update blob", http.StatusInternalServerError)
-				log.Printf("Failed to update blob: %v", err)
-				return
-			}
-
-			// Return the updated blob as JSON
-			resp := map[string]string{"blob": newBlob}
-			jsonResp, err := json.Marshal(resp)
-			if err != nil {
-				http.Error(w, "Failed to marshal response", http.StatusInternalServerError)
-				log.Printf("Failed to marshal response: %v", err)
-				return
-			}
-			w.Header().Set("Content-Type", "application/json")
-			w.Write(jsonResp)
-			// TODO: Code does not handle errors in tiKV operations
-		default:
-			http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
-			log.Println("Invalid request method")
+	// Retrieve all blobs' values
+	var blobs []string
+	for _, key := range keys {
+		value, err := client.Get(r.Context(), key)
+		if err != nil {
+			http.Error(w, "Failed to retrieve blob", http.StatusInternalServerError)
+			log.Printf("Failed to retrieve blob: %v", err)
 			return
 		}
-	})
-	// TODO: Does not handle errors in the HTTP request handling
-	logger.Fatal(http.ListenAndServe(":8080", nil))
+		blobs = append(blobs, string(value))
+	}
+
+	// Return all blobs as JSON array
+	resp := map[string][]string{"blobs": blobs}
+	jsonResp, err := json.Marshal(resp)
+	if err != nil {
+		http.Error(w, "Failed to marshal response", http.StatusInternalServerError)
+		log.Printf("Failed to marshal response: %v", err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(jsonResp)
+}
+
+func handleGETRandom(w http.ResponseWriter, r *http.Request, client *rawkv.Client) {
+	keys, _, err := client.Scan(r.Context(), []byte("blob:"), []byte("blob:~"), 100)
+	if err != nil {
+		http.Error(w, "Failed to retrieve blobs", http.StatusInternalServerError)
+		log.Printf("Failed to retrieve blobs: %v", err)
+		return
+	}
+	if len(keys) == 0 {
+		http.Error(w, "No blobs found", http.StatusNotFound)
+		log.Println("No blobs found")
+		return
+	}
+
+	// Use local random generator to select a random blob
+	randGen := rand.New(rand.NewSource(time.Now().UnixNano()))
+	randomIndex := randGen.Intn(len(keys))
+	randomKey := keys[randomIndex]
+	value, err := client.Get(r.Context(), randomKey)
+	if err != nil {
+		http.Error(w, "Failed to retrieve blob", http.StatusInternalServerError)
+		log.Printf("Failed to retrieve blob: %v", err)
+		return
+	}
+	blob := string(value)
+
+	// Return the blob (either provided or retrieved) as JSON
+	resp := map[string]string{"blob": blob}
+	jsonResp, err := json.Marshal(resp)
+	if err != nil {
+		http.Error(w, "Failed to marshal response", http.StatusInternalServerError)
+		log.Printf("Failed to marshal response: %v", err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(jsonResp)
+}
+
+func handlePOST(w http.ResponseWriter, r *http.Request, client *rawkv.Client) {
+	blob := r.URL.Query().Get("blob")
+	if blob == "" {
+		http.Error(w, "No blob provided", http.StatusBadRequest)
+		log.Println("No blob provided")
+		return
+	}
+
+	// Check if the blob already exists
+	keys, _, err := client.Scan(r.Context(), []byte("blob:"), []byte("blob:~"), 100)
+	if err != nil {
+		http.Error(w, "Failed to retrieve blobs", http.StatusInternalServerError)
+		log.Printf("Failed to retrieve blobs: %v", err)
+		return
+	}
+	for _, key := range keys {
+		value, err := client.Get(r.Context(), key)
+		if err != nil {
+			http.Error(w, "Failed to retrieve blob", http.StatusInternalServerError)
+			log.Printf("Failed to retrieve blob: %v", err)
+			return
+		}
+		if string(value) == blob {
+			http.Error(w, "Blob already exists", http.StatusConflict)
+			log.Println("Blob already exists")
+			return
+		}
+	}
+
+	key := fmt.Sprintf("blob:%d", time.Now().UnixNano())
+	err = client.Put(r.Context(), []byte(key), []byte(blob))
+	if err != nil {
+		http.Error(w, "Failed to save blob", http.StatusInternalServerError)
+		log.Printf("Failed to save blob: %v", err)
+		return
+	}
+
+	// Return the saved blob as JSON
+	resp := map[string]string{"blob": blob}
+	jsonResp, err := json.Marshal(resp)
+	if err != nil {
+		http.Error(w, "Failed to marshal response", http.StatusInternalServerError)
+		log.Printf("Failed to marshal response: %v", err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(jsonResp)
+}
+
+func handleDELETE(w http.ResponseWriter, r *http.Request, client *rawkv.Client) {
+	blob := r.URL.Query().Get("blob")
+	if blob == "" {
+		http.Error(w, "No blob provided", http.StatusBadRequest)
+		log.Println("No blob provided")
+		return
+	}
+
+	keys, _, err := client.Scan(r.Context(), []byte("blob:"), []byte("blob:~"), 100)
+	if err != nil {
+		http.Error(w, "Failed to retrieve blobs", http.StatusInternalServerError)
+		log.Printf("Failed to retrieve blobs: %v", err)
+		return
+	}
+	var keyToDelete []byte
+	for _, key := range keys {
+		value, err := client.Get(r.Context(), key)
+		if err != nil {
+			http.Error(w, "Failed to retrieve blob", http.StatusInternalServerError)
+			log.Printf("Failed to retrieve blob: %v", err)
+			return
+		}
+		if string(value) == blob {
+			keyToDelete = key
+			break
+		}
+	}
+
+	if keyToDelete == nil {
+		http.Error(w, "Blob not found", http.StatusNotFound)
+		log.Println("Blob not found")
+		return
+	}
+
+	err = client.Delete(r.Context(), keyToDelete)
+	if err != nil {
+		http.Error(w, "Failed to delete blob", http.StatusInternalServerError)
+		log.Printf("Failed to delete blob: %v", err)
+		return
+	}
+
+	// Return success message as JSON
+	resp := map[string]string{"message": "Blob deleted successfully"}
+	jsonResp, err := json.Marshal(resp)
+	if err != nil {
+		http.Error(w, "Failed to marshal response", http.StatusInternalServerError)
+		log.Printf("Failed to marshal response: %v", err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(jsonResp)
+}
+
+func handlePUT(w http.ResponseWriter, r *http.Request, client *rawkv.Client) {
+	oldBlob := r.URL.Query().Get("oldBlob")
+	if oldBlob == "" {
+		http.Error(w, "No old blob provided", http.StatusBadRequest)
+		log.Println("No old blob provided")
+		return
+	}
+	newBlob := r.URL.Query().Get("newBlob")
+	if newBlob == "" {
+		http.Error(w, "No new blob provided", http.StatusBadRequest)
+		log.Println("No new blob provided")
+		return
+	}
+
+	keys, _, err := client.Scan(r.Context(), []byte("blob:"), []byte("blob:~"), 100)
+	if err != nil {
+		http.Error(w, "Failed to retrieve blobs", http.StatusInternalServerError)
+		log.Printf("Failed to retrieve blobs: %v", err)
+		return
+	}
+	var keyToUpdate []byte
+	for _, key := range keys {
+		value, err := client.Get(r.Context(), key)
+		if err != nil {
+			http.Error(w, "Failed to retrieve blob", http.StatusInternalServerError)
+			log.Printf("Failed to retrieve blob: %v", err)
+			return
+		}
+		if string(value) == oldBlob {
+			keyToUpdate = key
+			break
+		}
+	}
+
+	if keyToUpdate == nil {
+		http.Error(w, "Blob not found", http.StatusNotFound)
+		log.Println("Blob not found")
+		return
+	}
+
+	err = client.Put(r.Context(), keyToUpdate, []byte(newBlob))
+	if err != nil {
+		http.Error(w, "Failed to update blob", http.StatusInternalServerError)
+		log.Printf("Failed to update blob: %v", err)
+		return
+	}
+
+	// Return the updated blob as JSON
+	resp := map[string]string{"blob": newBlob}
+	jsonResp, err := json.Marshal(resp)
+	if err != nil {
+		http.Error(w, "Failed to marshal response", http.StatusInternalServerError)
+		log.Printf("Failed to marshal response: %v", err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(jsonResp)
 }
 
 // Implement countBlobs function to count the number of blobs in the TiKV store.
