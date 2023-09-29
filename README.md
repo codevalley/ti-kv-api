@@ -1,5 +1,6 @@
 # TiKV API
 
+[![Go](https://github.com/codevalley/ti-kv-api/actions/workflows/go.yml/badge.svg?branch=master)](https://github.com/codevalley/ti-kv-api/actions/workflows/go.yml)
 ## Introduction
 
 This project provides a simple API to interact with TiKV, a distributed transactional key-value database. Using this API, users can store, retrieve, update, and delete blobs of data in TiKV. The API is built with Go and utilizes the TiKV client to interact directly with a TiKV cluster.
