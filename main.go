@@ -40,17 +40,14 @@
 //   - Query parameter "newBlob" should be the new blob to replace the old blob.
 //   - Example: /blobs?oldBlob=To%20be%20or%20not%20to%20be%2C%20that%20is%20the%20question.&newBlob=To%20be%20or%20not%20to%20be%2C%20that%20is%20the%20answer.
 //
-// GET /blobs/count
+// GET /?action=count
 //   - Get the number of blobs in the TiKV store.
-//   - Example: /blobs/count
 //
-// GET /blobs/random
+// GET /?action=<random>
 //   - Get a random blob from the TiKV store.
-//   - Example: /blobs/random
 //
-// GET /blobs/all
+// GET /?action=all
 //   - Get all blobs from the TiKV store.
-//   - Example: /blobs/all
 
 package main
 
@@ -103,6 +100,11 @@ func main() {
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }
 
+// setupLogging initializes a new logger and returns it.
+// The logger writes to a file named "tikvApi.log" in the current directory.
+// If the file does not exist, it will be created.
+// If the file already exists, new logs will be appended to the end of the file.
+// The logger uses the default logger flags for log entries.
 func setupLogging() *log.Logger {
 	logFile, err := os.OpenFile("tikvApi.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
@@ -111,6 +113,7 @@ func setupLogging() *log.Logger {
 	return log.New(logFile, "", log.LstdFlags)
 }
 
+// setupMonitoring sets up a goroutine that logs the number of keys in TiKV every 30 seconds.
 func setupMonitoring() {
 	go func() {
 		for {
@@ -120,6 +123,11 @@ func setupMonitoring() {
 	}()
 }
 
+// setupClientPool creates a pool of TiKV clients and returns a channel of clients.
+// The size of the pool is determined by the clientPoolSize variable.
+// Each client is created using the rawkv.NewClient function with the provided context, PD addresses, and security options.
+// If an error occurs while creating a client, the function will log a fatal error and exit.
+// The function returns a channel of clients that can be used to perform operations on TiKV.
 func setupClientPool() chan *rawkv.Client {
 	clientPoolSize := 10
 	clientPool := make(chan *rawkv.Client, clientPoolSize)
@@ -133,6 +141,8 @@ func setupClientPool() chan *rawkv.Client {
 	return clientPool
 }
 
+// handleRequest handles incoming HTTP requests and routes them to the appropriate handler function based on the request method.
+// It also manages a pool of rawkv clients to handle the requests.
 func handleRequest(w http.ResponseWriter, r *http.Request, clientPool chan *rawkv.Client) {
 	client := <-clientPool
 	defer func() {
@@ -156,7 +166,6 @@ func handleRequest(w http.ResponseWriter, r *http.Request, clientPool chan *rawk
 }
 
 // Further break down each HTTP method handler into its own function, e.g.:
-
 func handleGET(w http.ResponseWriter, r *http.Request, client *rawkv.Client) {
 	action := r.URL.Query().Get("action")
 	log.Printf("Action: %v", action)
@@ -167,95 +176,7 @@ func handleGET(w http.ResponseWriter, r *http.Request, client *rawkv.Client) {
 	} else {
 		handleGETRandom(w, r, client)
 	}
-
 }
-func handleGETCount(w http.ResponseWriter, client *rawkv.Client) {
-	count := countBlobs()
-	resp := map[string]int{"count": count}
-	jsonResp, err := json.Marshal(resp)
-	if err != nil {
-		http.Error(w, "Failed to marshal response", http.StatusInternalServerError)
-		log.Printf("Failed to marshal response: %v", err)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Write(jsonResp)
-}
-
-func handleGETAll(w http.ResponseWriter, r *http.Request, client *rawkv.Client) {
-	keys, _, err := client.Scan(r.Context(), []byte("blob:"), []byte("blob:~"), 100)
-	if err != nil {
-		http.Error(w, "Failed to retrieve blobs", http.StatusInternalServerError)
-		log.Printf("Failed to retrieve blobs: %v", err)
-		return
-	}
-	if len(keys) == 0 {
-		http.Error(w, "No blobs found", http.StatusNotFound)
-		log.Println("No blobs found")
-		return
-	}
-
-	// Retrieve all blobs' values
-	var blobs []string
-	for _, key := range keys {
-		value, err := client.Get(r.Context(), key)
-		if err != nil {
-			http.Error(w, "Failed to retrieve blob", http.StatusInternalServerError)
-			log.Printf("Failed to retrieve blob: %v", err)
-			return
-		}
-		blobs = append(blobs, string(value))
-	}
-
-	// Return all blobs as JSON array
-	resp := map[string][]string{"blobs": blobs}
-	jsonResp, err := json.Marshal(resp)
-	if err != nil {
-		http.Error(w, "Failed to marshal response", http.StatusInternalServerError)
-		log.Printf("Failed to marshal response: %v", err)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Write(jsonResp)
-}
-
-func handleGETRandom(w http.ResponseWriter, r *http.Request, client *rawkv.Client) {
-	keys, _, err := client.Scan(r.Context(), []byte("blob:"), []byte("blob:~"), 100)
-	if err != nil {
-		http.Error(w, "Failed to retrieve blobs", http.StatusInternalServerError)
-		log.Printf("Failed to retrieve blobs: %v", err)
-		return
-	}
-	if len(keys) == 0 {
-		http.Error(w, "No blobs found", http.StatusNotFound)
-		log.Println("No blobs found")
-		return
-	}
-
-	// Use local random generator to select a random blob
-	randGen := rand.New(rand.NewSource(time.Now().UnixNano()))
-	randomIndex := randGen.Intn(len(keys))
-	randomKey := keys[randomIndex]
-	value, err := client.Get(r.Context(), randomKey)
-	if err != nil {
-		http.Error(w, "Failed to retrieve blob", http.StatusInternalServerError)
-		log.Printf("Failed to retrieve blob: %v", err)
-		return
-	}
-	blob := string(value)
-
-	// Return the blob (either provided or retrieved) as JSON
-	resp := map[string]string{"blob": blob}
-	jsonResp, err := json.Marshal(resp)
-	if err != nil {
-		http.Error(w, "Failed to marshal response", http.StatusInternalServerError)
-		log.Printf("Failed to marshal response: %v", err)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Write(jsonResp)
-}
-
 func handlePOST(w http.ResponseWriter, r *http.Request, client *rawkv.Client) {
 	blob := r.URL.Query().Get("blob")
 	if blob == "" {
@@ -407,6 +328,93 @@ func handlePUT(w http.ResponseWriter, r *http.Request, client *rawkv.Client) {
 
 	// Return the updated blob as JSON
 	resp := map[string]string{"blob": newBlob}
+	jsonResp, err := json.Marshal(resp)
+	if err != nil {
+		http.Error(w, "Failed to marshal response", http.StatusInternalServerError)
+		log.Printf("Failed to marshal response: %v", err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(jsonResp)
+}
+
+func handleGETCount(w http.ResponseWriter, client *rawkv.Client) {
+	count := countBlobs()
+	resp := map[string]int{"count": count}
+	jsonResp, err := json.Marshal(resp)
+	if err != nil {
+		http.Error(w, "Failed to marshal response", http.StatusInternalServerError)
+		log.Printf("Failed to marshal response: %v", err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(jsonResp)
+}
+
+func handleGETAll(w http.ResponseWriter, r *http.Request, client *rawkv.Client) {
+	keys, _, err := client.Scan(r.Context(), []byte("blob:"), []byte("blob:~"), 100)
+	if err != nil {
+		http.Error(w, "Failed to retrieve blobs", http.StatusInternalServerError)
+		log.Printf("Failed to retrieve blobs: %v", err)
+		return
+	}
+	if len(keys) == 0 {
+		http.Error(w, "No blobs found", http.StatusNotFound)
+		log.Println("No blobs found")
+		return
+	}
+
+	// Retrieve all blobs' values
+	var blobs []string
+	for _, key := range keys {
+		value, err := client.Get(r.Context(), key)
+		if err != nil {
+			http.Error(w, "Failed to retrieve blob", http.StatusInternalServerError)
+			log.Printf("Failed to retrieve blob: %v", err)
+			return
+		}
+		blobs = append(blobs, string(value))
+	}
+
+	// Return all blobs as JSON array
+	resp := map[string][]string{"blobs": blobs}
+	jsonResp, err := json.Marshal(resp)
+	if err != nil {
+		http.Error(w, "Failed to marshal response", http.StatusInternalServerError)
+		log.Printf("Failed to marshal response: %v", err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(jsonResp)
+}
+
+func handleGETRandom(w http.ResponseWriter, r *http.Request, client *rawkv.Client) {
+	keys, _, err := client.Scan(r.Context(), []byte("blob:"), []byte("blob:~"), 100)
+	if err != nil {
+		http.Error(w, "Failed to retrieve blobs", http.StatusInternalServerError)
+		log.Printf("Failed to retrieve blobs: %v", err)
+		return
+	}
+	if len(keys) == 0 {
+		http.Error(w, "No blobs found", http.StatusNotFound)
+		log.Println("No blobs found")
+		return
+	}
+
+	// Use local random generator to select a random blob
+	randGen := rand.New(rand.NewSource(time.Now().UnixNano()))
+	randomIndex := randGen.Intn(len(keys))
+	randomKey := keys[randomIndex]
+	value, err := client.Get(r.Context(), randomKey)
+	if err != nil {
+		http.Error(w, "Failed to retrieve blob", http.StatusInternalServerError)
+		log.Printf("Failed to retrieve blob: %v", err)
+		return
+	}
+	blob := string(value)
+
+	// Return the blob (either provided or retrieved) as JSON
+	resp := map[string]string{"blob": blob}
 	jsonResp, err := json.Marshal(resp)
 	if err != nil {
 		http.Error(w, "Failed to marshal response", http.StatusInternalServerError)
