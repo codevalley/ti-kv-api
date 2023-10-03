@@ -65,39 +65,56 @@ import (
 	"github.com/tikv/client-go/v2/rawkv"
 )
 
-var clientPool *rawkv.Client
+const ClientPoolSize = 10
+const DefaultMonitoringInterval = 30 * time.Second
+
+var clientPool chan RawKVClientInterface
 var ctx = context.Background()
 var pdAddrs = []string{"pd-server:2379"}
 var security = config.Security{}
-
-func init() {
-	// Initialize TiKV client pool
-	var err error
-	clientPool, err = rawkv.NewClient(ctx, pdAddrs, security)
-	if err != nil {
-		log.Fatalf("Failed to create TiKV client: %v", err)
-	}
-
-	// Create local random generator
-	randGen := rand.New(rand.NewSource(time.Now().UnixNano()))
-	// TODO: Local random generator is not truly random
-	randGen.Seed(randGen.Int63())
-}
 
 // main is the entry point of the TikvApi application. It sets up logging and monitoring,
 // creates a pool of TiKV clients, and handles HTTP requests for retrieving, saving, and deleting blobs.
 // It uses the rawkv package to interact with TiKV.
 func main() {
 	setupLogging()
-	setupMonitoring()
-
-	clientPool := setupClientPool()
+	clientPool := setupClientPool(false) //not mock
+	setupMonitoring(clientPool)
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		handleRequest(w, r, clientPool)
 	})
 
 	log.Fatal(http.ListenAndServe(":8080", nil))
+}
+
+// setupClientPool creates a pool of TiKV clients and returns a channel of clients.
+// The size of the pool is determined by the clientPoolSize variable.
+// Each client is created using the rawkv.NewClient function with the provided context, PD addresses, and security options.
+// If an error occurs while creating a client, the function will log a fatal error and exit.
+// The function returns a channel of clients that can be used to perform operations on TiKV.
+func setupClientPool(useMock bool) chan RawKVClientInterface {
+	clientPool := make(chan RawKVClientInterface, ClientPoolSize)
+	for i := 0; i < ClientPoolSize; i++ {
+		var client RawKVClientInterface
+		if useMock {
+			client = NewMockRawKVClientInterface(nil) // Assuming you have the mock generated
+		} else {
+			actualClient, err := rawkv.NewClient(ctx, pdAddrs, security)
+			if err != nil {
+				log.Fatalf("Failed to create TiKV client: %v", err)
+			}
+			client = &RawKVClientWrapper{
+				client: actualClient,
+			}
+		}
+		clientPool <- client
+	}
+	return clientPool
+}
+
+func getClientFromPool(clientPool chan RawKVClientInterface) RawKVClientInterface {
+	return <-clientPool
 }
 
 // setupLogging initializes a new logger and returns it.
@@ -114,37 +131,24 @@ func setupLogging() *log.Logger {
 }
 
 // setupMonitoring sets up a goroutine that logs the number of keys in TiKV every 30 seconds.
-func setupMonitoring() {
+func setupMonitoring(clientPool chan RawKVClientInterface, interval ...time.Duration) {
+	sleepDuration := DefaultMonitoringInterval
+	if len(interval) > 0 {
+		sleepDuration = interval[0]
+	}
+
 	go func() {
 		for {
-			time.Sleep(30 * time.Second)
-			log.Printf("Number of keys in TiKV: %d", countBlobs())
+			time.Sleep(sleepDuration)
+			log.Printf("Number of keys in TiKV: %d", countBlobs(<-clientPool))
 		}
 	}()
 }
 
-// setupClientPool creates a pool of TiKV clients and returns a channel of clients.
-// The size of the pool is determined by the clientPoolSize variable.
-// Each client is created using the rawkv.NewClient function with the provided context, PD addresses, and security options.
-// If an error occurs while creating a client, the function will log a fatal error and exit.
-// The function returns a channel of clients that can be used to perform operations on TiKV.
-func setupClientPool() chan *rawkv.Client {
-	clientPoolSize := 10
-	clientPool := make(chan *rawkv.Client, clientPoolSize)
-	for i := 0; i < clientPoolSize; i++ {
-		client, err := rawkv.NewClient(ctx, pdAddrs, security)
-		if err != nil {
-			log.Fatalf("Failed to create TiKV client: %v", err)
-		}
-		clientPool <- client
-	}
-	return clientPool
-}
-
 // handleRequest handles incoming HTTP requests and routes them to the appropriate handler function based on the request method.
 // It also manages a pool of rawkv clients to handle the requests.
-func handleRequest(w http.ResponseWriter, r *http.Request, clientPool chan *rawkv.Client) {
-	client := <-clientPool
+func handleRequest(w http.ResponseWriter, r *http.Request, clientPool chan RawKVClientInterface) {
+	client := getClientFromPool(clientPool)
 	defer func() {
 		clientPool <- client
 	}()
@@ -166,7 +170,7 @@ func handleRequest(w http.ResponseWriter, r *http.Request, clientPool chan *rawk
 }
 
 // Further break down each HTTP method handler into its own function, e.g.:
-func handleGET(w http.ResponseWriter, r *http.Request, client *rawkv.Client) {
+func handleGET(w http.ResponseWriter, r *http.Request, client RawKVClientInterface) {
 	action := r.URL.Query().Get("action")
 	log.Printf("Action: %v", action)
 	if action == "count" {
@@ -177,7 +181,8 @@ func handleGET(w http.ResponseWriter, r *http.Request, client *rawkv.Client) {
 		handleGETRandom(w, r, client)
 	}
 }
-func handlePOST(w http.ResponseWriter, r *http.Request, client *rawkv.Client) {
+
+func handlePOST(w http.ResponseWriter, r *http.Request, client RawKVClientInterface) {
 	blob := r.URL.Query().Get("blob")
 	if blob == "" {
 		http.Error(w, "No blob provided", http.StatusBadRequest)
@@ -226,7 +231,7 @@ func handlePOST(w http.ResponseWriter, r *http.Request, client *rawkv.Client) {
 	w.Write(jsonResp)
 }
 
-func handleDELETE(w http.ResponseWriter, r *http.Request, client *rawkv.Client) {
+func handleDELETE(w http.ResponseWriter, r *http.Request, client RawKVClientInterface) {
 	blob := r.URL.Query().Get("blob")
 	if blob == "" {
 		http.Error(w, "No blob provided", http.StatusBadRequest)
@@ -279,7 +284,7 @@ func handleDELETE(w http.ResponseWriter, r *http.Request, client *rawkv.Client) 
 	w.Write(jsonResp)
 }
 
-func handlePUT(w http.ResponseWriter, r *http.Request, client *rawkv.Client) {
+func handlePUT(w http.ResponseWriter, r *http.Request, client RawKVClientInterface) {
 	oldBlob := r.URL.Query().Get("oldBlob")
 	if oldBlob == "" {
 		http.Error(w, "No old blob provided", http.StatusBadRequest)
@@ -338,8 +343,8 @@ func handlePUT(w http.ResponseWriter, r *http.Request, client *rawkv.Client) {
 	w.Write(jsonResp)
 }
 
-func handleGETCount(w http.ResponseWriter, client *rawkv.Client) {
-	count := countBlobs()
+func handleGETCount(w http.ResponseWriter, client RawKVClientInterface) {
+	count := countBlobs(client)
 	resp := map[string]int{"count": count}
 	jsonResp, err := json.Marshal(resp)
 	if err != nil {
@@ -351,7 +356,7 @@ func handleGETCount(w http.ResponseWriter, client *rawkv.Client) {
 	w.Write(jsonResp)
 }
 
-func handleGETAll(w http.ResponseWriter, r *http.Request, client *rawkv.Client) {
+func handleGETAll(w http.ResponseWriter, r *http.Request, client RawKVClientInterface) {
 	keys, _, err := client.Scan(r.Context(), []byte("blob:"), []byte("blob:~"), 100)
 	if err != nil {
 		http.Error(w, "Failed to retrieve blobs", http.StatusInternalServerError)
@@ -388,7 +393,7 @@ func handleGETAll(w http.ResponseWriter, r *http.Request, client *rawkv.Client) 
 	w.Write(jsonResp)
 }
 
-func handleGETRandom(w http.ResponseWriter, r *http.Request, client *rawkv.Client) {
+func handleGETRandom(w http.ResponseWriter, r *http.Request, client RawKVClientInterface) {
 	keys, _, err := client.Scan(r.Context(), []byte("blob:"), []byte("blob:~"), 100)
 	if err != nil {
 		http.Error(w, "Failed to retrieve blobs", http.StatusInternalServerError)
@@ -426,8 +431,13 @@ func handleGETRandom(w http.ResponseWriter, r *http.Request, client *rawkv.Clien
 }
 
 // Implement countBlobs function to count the number of blobs in the TiKV store.
-func countBlobs() int {
-	keys, _, err := clientPool.Scan(ctx, []byte("blob:"), []byte("blob:~"), 100)
+func countBlobs(client RawKVClientInterface) int {
+	if client == nil {
+		log.Println("Client is nil")
+		return -1
+	}
+
+	keys, _, err := client.Scan(ctx, []byte("blob:"), []byte("blob:~"), 100)
 	if err != nil {
 		log.Printf("Failed to count blobs: %v", err)
 		return -1
