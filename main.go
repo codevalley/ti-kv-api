@@ -78,14 +78,19 @@ var security = config.Security{}
 // It uses the rawkv package to interact with TiKV.
 func main() {
 	setupLogging()
-	clientPool := setupClientPool(false) //not mock
+	clientPool := setupClientPool(false) // not mock
 	setupMonitoring(clientPool)
 
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+	mux := setupServer(clientPool)
+	log.Fatal(http.ListenAndServe(":8080", mux))
+}
+
+func setupServer(clientPool chan RawKVClientInterface) *http.ServeMux {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		handleRequest(w, r, clientPool)
 	})
-
-	log.Fatal(http.ListenAndServe(":8080", nil))
+	return mux
 }
 
 // setupClientPool creates a pool of TiKV clients and returns a channel of clients.

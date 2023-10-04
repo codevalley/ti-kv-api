@@ -17,6 +17,71 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+func TestServer(t *testing.T) {
+
+	// Create a mock controller
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	// Create the mock client using the mock controller
+	mockClient := NewMockRawKVClientInterface(ctrl)
+
+	// Mock client pool.
+	clientPool := make(chan RawKVClientInterface, 1)
+	clientPool <- mockClient
+	defer close(clientPool)
+
+	// Setup the server with the mock client pool
+	mux := setupServer(clientPool)
+	// Create a test server using the HTTP server mux
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	//Setting the mock values correctly is most important yet painful part of this entire method.
+	// Mock the Scan method to return a slice of keys.
+	mockKeys := [][]byte{
+		[]byte("blob:1"),
+		[]byte("blob:2"),
+		[]byte("blob:3"),
+	}
+	mockClient.EXPECT().Scan(gomock.Any(), []byte("blob:"), []byte("blob:~"), 100).Return(mockKeys, nil, nil).AnyTimes()
+
+	// Mock the Get method for the GET request.
+	mockClient.EXPECT().Get(gomock.Any(), gomock.Any()).Return([]byte("randomValue"), nil).AnyTimes()
+
+	// Mock the Get method for the PUT request to check if the old blob exists.
+	expectedOldBlob := "randomValue"
+	mockClient.EXPECT().Get(gomock.Any(), gomock.Eq([]byte("blob:1"))).Return([]byte(expectedOldBlob), nil).AnyTimes()
+
+	// Mock the Put method for the PUT request to update the blob.
+	expectedNewBlob := "newBlobValue"
+	mockClient.EXPECT().Put(gomock.Any(), gomock.Eq([]byte("blob:1")), gomock.Eq([]byte(expectedNewBlob))).Return(nil).AnyTimes()
+
+	// Define test cases
+	tests := []struct {
+		method string
+		url    string
+		status int
+	}{
+		{http.MethodPut, "/?oldBlob=randomValue&newBlob=newBlobValue", http.StatusOK},
+		{http.MethodGet, "/", http.StatusOK},
+	}
+
+	// Execute test cases
+	for _, tt := range tests {
+		req := httptest.NewRequest(tt.method, tt.url, nil)
+		w := httptest.NewRecorder()
+
+		// Call the handler function directly
+		handleRequest(w, req, clientPool)
+
+		resp := w.Result()
+		if resp.StatusCode != tt.status {
+			t.Errorf("Expected status %d for %s %s; got %d", tt.status, tt.method, tt.url, resp.StatusCode)
+		}
+	}
+}
+
 func TestSetupLogging(t *testing.T) {
 	// Call the setupLogging function.
 	setupLogging()
@@ -100,137 +165,6 @@ func TestSetupMonitoring(t *testing.T) {
 		t.Errorf("Expected log to contain %q, but got %q", expectedLog, buf.String())
 	}
 }
-
-// func TestHandleRequest(t *testing.T) {
-// 	ctrl := gomock.NewController(t)
-// 	defer ctrl.Finish()
-
-// 	// Create a mock client.
-// 	mockClient := NewMockRawKVClientInterface(ctrl)
-
-// 	// Mock client pool.
-// 	clientPool := make(chan RawKVClientInterface, 1)
-// 	clientPool <- mockClient
-// 	defer close(clientPool)
-
-// 	// Test for HTTP GET method
-// 	t.Run("HTTP GET", func(t *testing.T) {
-// 		// Create a mock response writer.
-// 		w := httptest.NewRecorder()
-
-// 		// Mock request with HTTP GET method.
-// 		req, err := http.NewRequest(http.MethodGet, "/", nil)
-// 		assert.NoError(t, err)
-
-// 		// Set up the mock client to expect the Scan method call and return a valid result.
-// 		mockKeys := [][]byte{
-// 			[]byte("blob:1"),
-// 			[]byte("blob:2"),
-// 			[]byte("blob:3"),
-// 		}
-// 		mockClient.EXPECT().Scan(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(mockKeys, nil, nil).AnyTimes()
-
-// 		// Set up the mock client to expect the Get method call and return a valid blob.
-// 		mockClient.EXPECT().Get(gomock.Any(), gomock.Any()).Return([]byte("someBlobValue"), nil).AnyTimes()
-
-// 		// Handle the request.
-// 		handleRequest(w, req, clientPool)
-
-// 		// Assert that the response status code is 200.
-// 		assert.Equal(t, http.StatusOK, w.Result().StatusCode)
-// 	})
-
-// 	// Test for HTTP POST method
-// 	t.Run("HTTP POST", func(t *testing.T) {
-// 		// Create a mock response writer.
-// 		w := httptest.NewRecorder()
-
-// 		// Mock request with HTTP POST method and a blob.
-// 		req, err := http.NewRequest(http.MethodPost, "/?blob=someBlobValue", nil)
-// 		assert.NoError(t, err)
-
-// 		// Mock the Scan method to return a slice of keys.
-// 		mockKeys := [][]byte{
-// 			[]byte("blob:1"),
-// 			[]byte("blob:2"),
-// 			[]byte("blob:3"),
-// 		}
-// 		mockClient.EXPECT().Scan(context.Background(), []byte("blob:"), []byte("blob:~"), 100).Return(mockKeys, nil, nil)
-
-// 		// Mock the Get method to return different values for each key to simulate that the blob doesn't exist.
-// 		mockClient.EXPECT().Get(context.Background(), gomock.Any()).Return([]byte("notPostMe"), nil).AnyTimes()
-
-// 		// Mock the Put method to save the blob.
-// 		mockClient.EXPECT().Put(context.Background(), gomock.Any(), []byte("postMe")).Return(nil)
-
-// 		// Handle the request.
-// 		handleRequest(w, req, clientPool)
-
-// 		// Assert that the response status code is 200.
-// 		assert.Equal(t, http.StatusOK, w.Result().StatusCode)
-// 	})
-
-// 	// Test for HTTP DELETE method
-// 	t.Run("HTTP DELETE", func(t *testing.T) {
-// 		// Create a mock response writer.
-// 		w := httptest.NewRecorder()
-
-// 		// Mock request with HTTP DELETE method and a blob.
-// 		req, err := http.NewRequest(http.MethodDelete, "/?blob=someBlobValue", nil)
-// 		assert.NoError(t, err)
-
-// 		// Set up the mock client to expect the Delete method call.
-// 		mockClient.EXPECT().Delete(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
-
-// 		// Handle the request.
-// 		handleRequest(w, req, clientPool)
-
-// 		// Assert that the response status code is 200.
-// 		assert.Equal(t, http.StatusOK, w.Result().StatusCode)
-// 	})
-
-// 	// Test for HTTP PUT method
-// 	t.Run("HTTP PUT", func(t *testing.T) {
-// 		// Create a mock response writer.
-// 		w := httptest.NewRecorder()
-
-// 		// Mock request with HTTP PUT method.
-// 		req, err := http.NewRequest(http.MethodPut, "/", nil)
-// 		assert.NoError(t, err)
-
-// 		// Set up the mock client to expect the Get method call and return a valid blob.
-// 		mockClient.EXPECT().Get(gomock.Any(), gomock.Any()).Return([]byte("oldBlobValue"), nil).AnyTimes()
-
-// 		// Set up the mock client to expect the Put method call.
-// 		mockClient.EXPECT().Put(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
-
-// 		// Handle the request.
-// 		handleRequest(w, req, clientPool)
-
-// 		// Assert that the response status code is 200.
-// 		assert.Equal(t, http.StatusOK, w.Result().StatusCode)
-// 	})
-
-// 	// Test for invalid HTTP method
-// 	t.Run("HTTP PUT", func(t *testing.T) {
-// 		// Create a mock response writer.
-// 		w := httptest.NewRecorder()
-
-// 		// Mock request with HTTP PUT method, old blob, and new blob.
-// 		req, err := http.NewRequest(http.MethodPut, "/?oldBlob=oldValue&newBlob=newValue", nil)
-// 		assert.NoError(t, err)
-
-// 		// Set up the mock client to expect the Get and Put method calls.
-// 		mockClient.EXPECT().Get(gomock.Any(), gomock.Any()).Return([]byte("oldValue"), nil).AnyTimes()
-// 		mockClient.EXPECT().Put(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
-
-// 		// Handle the request.
-// 		handleRequest(w, req, clientPool)
-
-// 		// Assert that the response status code is 200.
-// 		assert.Equal(t, http.StatusOK, w.Result().StatusCode)
-// 	})
-// }
 
 func TestHandleGET(t *testing.T) {
 	ctrl := gomock.NewController(t)
