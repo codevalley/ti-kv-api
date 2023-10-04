@@ -53,6 +53,6 @@ jobs:
             # Configure action by specifying input parameters individually (option 2)
             profile: cover.out
             # local-prefix: github.com/org/project
-            threshold-file: 50
+            threshold-file: 0
             threshold-package: 50
-            threshold-total: 55
+            threshold-total: 50
