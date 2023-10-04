@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -49,42 +50,144 @@ func TestServer(t *testing.T) {
 	// Mock the Get method for the GET request.
 	mockClient.EXPECT().Get(gomock.Any(), gomock.Any()).Return([]byte("randomValue"), nil).AnyTimes()
 
+	// Create a mock response writer.
+	w := httptest.NewRecorder()
+	// Mock request with HTTP GET method.
+	req, err := http.NewRequest(http.MethodGet, "/", nil)
+	assert.NoError(t, err)
+	// Handle the request.
+	handleRequest(w, req, clientPool)
+	// Assert that the response status code is 200.
+	assert.Equal(t, http.StatusOK, w.Result().StatusCode)
+}
+func TestHandleRequest(t *testing.T) {
+	// Create a mock controller
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	// Create the mock client using the mock controller
+	mockClient := NewMockRawKVClientInterface(ctrl)
+
+	// Mock client pool.
+	clientPool := make(chan RawKVClientInterface, 1)
+	clientPool <- mockClient
+	defer close(clientPool)
+
+	//Setting the mock values correctly is most important yet painful part of this entire method.
+	// Mock the Scan method to return a slice of keys.
+	mockKeys := [][]byte{
+		[]byte("blob:1"),
+		[]byte("blob:2"),
+		[]byte("blob:3"),
+	}
+	mockClient.EXPECT().Scan(gomock.Any(), []byte("blob:"), []byte("blob:~"), 100).Return(mockKeys, nil, nil).AnyTimes()
+
+	// Mock the Get method for the GET request.
+	mockClient.EXPECT().Get(gomock.Any(), gomock.Any()).Return([]byte("randomValue"), nil).AnyTimes()
+
+	// Mock the Get method for the POST request to check if the blob exists.
+	mockClient.EXPECT().Get(gomock.Any(), gomock.Any()).Return(nil, errors.New("Blob not found")).AnyTimes()
+
+	// Mock the Put method for the POST request to save the blob.
+	expectedBlobForPost := "postBlobValue"
+	mockClient.EXPECT().Put(gomock.Any(), gomock.Any(), gomock.Eq([]byte(expectedBlobForPost))).Return(nil).AnyTimes()
+
 	// Mock the Get method for the PUT request to check if the old blob exists.
-	expectedOldBlob := "randomValue"
-	mockClient.EXPECT().Get(gomock.Any(), gomock.Eq([]byte("blob:1"))).Return([]byte(expectedOldBlob), nil).AnyTimes()
+	expectedOldBlob := "oldBlobValue"
+	mockClient.EXPECT().Get(gomock.Any(), gomock.Any()).Return([]byte(expectedOldBlob), nil).AnyTimes()
 
 	// Mock the Put method for the PUT request to update the blob.
 	expectedNewBlob := "newBlobValue"
-	mockClient.EXPECT().Put(gomock.Any(), gomock.Eq([]byte("blob:1")), gomock.Eq([]byte(expectedNewBlob))).Return(nil).AnyTimes()
+	mockClient.EXPECT().Put(gomock.Any(), gomock.Any(), gomock.Eq([]byte(expectedNewBlob))).Return(nil).AnyTimes()
 
-	// Define test cases
-	tests := []struct {
-		method string
-		url    string
-		status int
-	}{
-		{http.MethodPut, "/?oldBlob=randomValue&newBlob=newBlobValue", http.StatusOK},
-		{http.MethodGet, "/", http.StatusOK},
-	}
+	// Mock the Delete method for the DELETE request to delete the blob.
+	mockClient.EXPECT().Delete(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
 
-	// Execute test cases
-	for _, tt := range tests {
-		req := httptest.NewRequest(tt.method, tt.url, nil)
+	// Test for HTTP GET method
+	t.Run("HTTP GET", func(t *testing.T) {
+		// Create a mock response writer.
 		w := httptest.NewRecorder()
 
-		// Call the handler function directly
+		// Mock request with HTTP GET method.
+		req, err := http.NewRequest(http.MethodGet, "/", nil)
+		assert.NoError(t, err)
+
+		// Handle the request.
 		handleRequest(w, req, clientPool)
 
-		resp := w.Result()
-		if resp.StatusCode != tt.status {
-			t.Errorf("Expected status %d for %s %s; got %d", tt.status, tt.method, tt.url, resp.StatusCode)
-		}
-	}
+		// Assert that the response status code is 200.
+		assert.Equal(t, http.StatusOK, w.Result().StatusCode)
+	})
+
+	// Test for HTTP POST method
+	t.Run("HTTP POST", func(t *testing.T) {
+		// Create a mock response writer.
+		w := httptest.NewRecorder()
+
+		// Mock request with HTTP POST method.
+		req, err := http.NewRequest(http.MethodPost, "/?blob=postBlobValue", nil)
+		assert.NoError(t, err)
+
+		// Handle the request.
+		handleRequest(w, req, clientPool)
+
+		// Assert that the response status code is 200.
+		assert.Equal(t, http.StatusOK, w.Result().StatusCode)
+	})
+
+	// Test for HTTP DELETE method
+	t.Run("HTTP DELETE", func(t *testing.T) {
+		// Create a mock response writer.
+		w := httptest.NewRecorder()
+
+		// Mock request with HTTP DELETE method.
+		req, err := http.NewRequest(http.MethodDelete, "/?blob=randomValue", nil)
+		assert.NoError(t, err)
+
+		// Handle the request.
+		handleRequest(w, req, clientPool)
+
+		// Assert that the response status code is 200.
+		assert.Equal(t, http.StatusOK, w.Result().StatusCode)
+	})
+
+	// Test for HTTP PUT method
+	t.Run("HTTP PUT", func(t *testing.T) {
+		// Create a mock response writer.
+		w := httptest.NewRecorder()
+
+		// Mock request with HTTP PUT method.
+		req, err := http.NewRequest(http.MethodPut, "/?oldBlob=randomValue&newBlob=newBlobValue", nil)
+		assert.NoError(t, err)
+
+		// Handle the request.
+		handleRequest(w, req, clientPool)
+
+		// Assert that the response status code is 200.
+		assert.Equal(t, http.StatusOK, w.Result().StatusCode)
+	})
+
+	// Test for invalid HTTP method
+	t.Run("Invalid HTTP method", func(t *testing.T) {
+		// Create a mock response writer.
+		w := httptest.NewRecorder()
+
+		// Mock request with an invalid HTTP method.
+		req, err := http.NewRequest("INVALID", "/", nil)
+		assert.NoError(t, err)
+
+		// Handle the request.
+		handleRequest(w, req, clientPool)
+
+		// Assert that the response status code is 405 (Method Not Allowed).
+		assert.Equal(t, http.StatusMethodNotAllowed, w.Result().StatusCode)
+	})
 }
 
 func TestSetupLogging(t *testing.T) {
 	// Call the setupLogging function.
-	setupLogging()
+	logger := setupLogging()
+	assert.NotNil(t, logger)
 
 	// Assert that the logging subsystem is initialized.
 	assert.NotNil(t, log.Default())
@@ -286,6 +389,18 @@ func TestHandlePOST(t *testing.T) {
 	err = json.Unmarshal(w.Body.Bytes(), &resp)
 	assert.NoError(t, err)
 	assert.Equal(t, "postMe", resp["blob"])
+
+	//assert scenario with no blob passed
+	// Create a mock request without the blob query parameter.
+	req1, err1 := http.NewRequest("POST", "/", nil)
+	w1 := httptest.NewRecorder()
+	assert.NoError(t, err1)
+
+	// Handle the request.
+	handlePOST(w1, req1, mockClient)
+
+	// Assert that the response status code is 400 (Bad Request).
+	assert.Equal(t, http.StatusBadRequest, w.Result().StatusCode)
 }
 
 func TestHandleDELETE(t *testing.T) {
