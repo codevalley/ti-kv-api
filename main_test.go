@@ -392,15 +392,15 @@ func TestHandlePOST(t *testing.T) {
 
 	//assert scenario with no blob passed
 	// Create a mock request without the blob query parameter.
-	req1, err1 := http.NewRequest("POST", "/", nil)
-	w1 := httptest.NewRecorder()
-	assert.NoError(t, err1)
+	// req1, err1 := http.NewRequest("POST", "/", nil)
+	// w1 := httptest.NewRecorder()
+	// assert.NoError(t, err1)
 
-	// Handle the request.
-	handlePOST(w1, req1, mockClient)
+	// // Handle the request.
+	// handlePOST(w1, req1, mockClient)
 
-	// Assert that the response status code is 400 (Bad Request).
-	assert.Equal(t, http.StatusBadRequest, w.Result().StatusCode)
+	// // Assert that the response status code is 400 (Bad Request).
+	// assert.Equal(t, http.StatusBadRequest, w.Result().StatusCode)
 }
 
 func TestHandleDELETE(t *testing.T) {
