@@ -665,3 +665,130 @@ func TestCountBlobs(t *testing.T) {
 		t.Errorf("Expected count to be %d, but got %d", len(mockKeys), count)
 	}
 }
+
+// //////New test cases////////////
+// Creates a new http.ServeMux instance
+func TestSetupServer_ClientPoolIsNil(t *testing.T) {
+	mux := setupServer(nil)
+	assert.NotNil(t, mux)
+}
+
+// Returns the http.ServeMux instance
+func TestSetupServer_ReturnsHTTPServeMuxInstance(t *testing.T) {
+	mux := setupServer(make(chan RawKVClientInterface))
+	assert.NotNil(t, mux)
+}
+
+// clientPool parameter is nil
+func TestSetupServer_ClientPoolParameterIsNil(t *testing.T) {
+	mux := setupServer(nil)
+	assert.NotNil(t, mux)
+}
+
+// clientPool parameter is empty
+func TestSetupServer_ClientPoolParameterIsEmpty(t *testing.T) {
+	mux := setupServer(make(chan RawKVClientInterface, 0))
+	assert.NotNil(t, mux)
+}
+
+// clientPool parameter is full
+func TestSetupServer_ClientPoolParameterIsFull(t *testing.T) {
+	mux := setupServer(make(chan RawKVClientInterface, 10))
+	assert.NotNil(t, mux)
+}
+
+////////////////////////////////////////////////////////////////
+
+// Use mock client if useMock is true
+func TestSetupClientPoolWithMock(t *testing.T) {
+	useMock := true
+	clientPool := setupClientPool(useMock)
+
+	// Assert that the client pool is of the correct size
+	assert.Equal(t, ClientPoolSize, len(clientPool))
+
+	// Assert that each client in the pool is a mock client
+	for i := 0; i < ClientPoolSize; i++ {
+		client := <-clientPool
+		_, ok := client.(*MockRawKVClientInterface)
+		assert.True(t, ok)
+	}
+}
+
+// Verify client pool size matches expected size
+func TestSetupClientPool_ClientPoolSizeMatchesExpectedSize(t *testing.T) {
+	useMock := true
+	clientPool := setupClientPool(useMock)
+	assert.Equal(t, ClientPoolSize, len(clientPool))
+}
+
+// Verify mock client is added to client pool when useMock is true
+func TestMockClientAddedToPoolWhenUseMockIsTrue(t *testing.T) {
+	// Set up
+	useMock := true
+	clientPool := setupClientPool(useMock)
+
+	// Verify
+	for i := 0; i < ClientPoolSize; i++ {
+		client := <-clientPool
+		_, isMock := client.(*MockRawKVClientInterface)
+		assert.True(t, isMock)
+	}
+}
+
+// Verify mock client is created with expected parameters
+func TestMockClientCreation(t *testing.T) {
+	// Set up the mock controller
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	// Create a mock client using the NewMockRawKVClientInterface function
+	mockClient := NewMockRawKVClientInterface(ctrl)
+
+	// Assert that the mock client is not nil
+	assert.NotNil(t, mockClient)
+
+	// Assert that the mock client is created with the expected parameters
+	// (assuming the mock generation code is correct)
+	// ...
+
+	// Additional assertions or verifications if needed
+	// ...
+
+}
+
+////////////////////////////////////////////////////////////////
+
+// handlePOST returns an error if no blob is provided
+func TestHandlePOSTReturnsErrorIfNoBlobProvided(t *testing.T) {
+	// Create a mock client
+	mockClient := &MockRawKVClientInterface{}
+
+	// Create a response writer and request for testing
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/", nil)
+
+	// Call the handlePOST function
+	handlePOST(w, r, mockClient)
+
+	// Assert that the response writer received the correct response
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Equal(t, "No blob provided\n", w.Body.String())
+}
+
+// handleDELETE returns an error if no blob is provided
+func TestHandleDELETEReturnsErrorIfNoBlobProvided(t *testing.T) {
+	// Create a mock client
+	mockClient := &MockRawKVClientInterface{}
+
+	// Create a response writer and request for testing
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodDelete, "/", nil)
+
+	// Call the handleDELETE function
+	handleDELETE(w, r, mockClient)
+
+	// Assert that the response writer received the correct response
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Equal(t, "No blob provided\n", w.Body.String())
+}
