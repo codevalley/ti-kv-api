@@ -41,6 +41,4 @@ jobs:
         chart: 'true'
         amend: 'true'
         reuse-go: 'true'
-      if: |
-        matrix.os == 'ubuntu-latest' 
       continue-on-error: true
