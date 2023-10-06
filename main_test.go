@@ -870,6 +870,162 @@ func TestValidPostRequest(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Result().StatusCode)
 }
 
+func TestErrorScanPostRequest(t *testing.T) {
+	// Create a mock controller
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	// Create the mock client using the mock controller
+	mockClient := NewMockRawKVClientInterface(ctrl)
+
+	// Mock client pool.
+	clientPool := make(chan RawKVClientInterface, 1)
+	clientPool <- mockClient
+	defer close(clientPool)
+
+	// Mock the Scan method to return a slice of keys.
+	mockKeys := [][]byte{
+		[]byte("blob:1"),
+		[]byte("blob:2"),
+		[]byte("blob:3"),
+	}
+
+	mockClient.EXPECT().Scan(context.Background(), []byte("blob:"), []byte("blob:~"), 100).Return(mockKeys, nil, errors.New("failed to retrieve blobs"))
+
+	// Create a mock response writer.
+	w := httptest.NewRecorder()
+
+	// Mock request with HTTP POST method.
+	req, err := http.NewRequest(http.MethodPost, "/?blob=postBlobValue", nil)
+	assert.NoError(t, err)
+
+	// Handle the request.
+	handleRequest(w, req, clientPool)
+
+	// Assert that the response status code is 200.
+	assert.Equal(t, http.StatusInternalServerError, w.Result().StatusCode)
+}
+
+func TestErrorFetchPostRequest(t *testing.T) {
+	// Create a mock controller
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	// Create the mock client using the mock controller
+	mockClient := NewMockRawKVClientInterface(ctrl)
+
+	// Mock client pool.
+	clientPool := make(chan RawKVClientInterface, 1)
+	clientPool <- mockClient
+	defer close(clientPool)
+
+	// Mock the Scan method to return a slice of keys.
+	mockKeys := [][]byte{
+		[]byte("blob:1"),
+		[]byte("blob:2"),
+		[]byte("blob:3"),
+	}
+
+	mockClient.EXPECT().Scan(context.Background(), []byte("blob:"), []byte("blob:~"), 100).Return(mockKeys, nil, nil)
+	// Mock the Get method to return different values for each key to simulate that the blob doesn't exist.
+	mockClient.EXPECT().Get(context.Background(), gomock.Any()).Return([]byte("notPostMe"), errors.New("failed to retrieve blob")).AnyTimes()
+
+	// Create a mock response writer.
+	w := httptest.NewRecorder()
+
+	// Mock request with HTTP POST method.
+	req, err := http.NewRequest(http.MethodPost, "/?blob=postBlobValue", nil)
+	assert.NoError(t, err)
+
+	// Handle the request.
+	handleRequest(w, req, clientPool)
+
+	// Assert that the response status code is 200.
+	assert.Equal(t, http.StatusInternalServerError, w.Result().StatusCode)
+}
+
+func TestErrorDuplicatePostRequest(t *testing.T) {
+	// Create a mock controller
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	// Create the mock client using the mock controller
+	mockClient := NewMockRawKVClientInterface(ctrl)
+
+	// Mock client pool.
+	clientPool := make(chan RawKVClientInterface, 1)
+	clientPool <- mockClient
+	defer close(clientPool)
+
+	// Mock the Scan method to return a slice of keys.
+	mockKeys := [][]byte{
+		[]byte("blob:1"),
+		[]byte("blob:2"),
+		[]byte("blob:3"),
+	}
+
+	mockClient.EXPECT().Scan(context.Background(), []byte("blob:"), []byte("blob:~"), 100).Return(mockKeys, nil, nil)
+	// Mock the Get method to return different values for each key to simulate that the blob doesn't exist.
+	mockClient.EXPECT().Get(context.Background(), gomock.Any()).Return([]byte("postBlobValue"), nil).AnyTimes()
+
+	// Create a mock response writer.
+	w := httptest.NewRecorder()
+
+	// Mock request with HTTP POST method.
+	req, err := http.NewRequest(http.MethodPost, "/?blob=postBlobValue", nil)
+	assert.NoError(t, err)
+
+	// Handle the request.
+	handleRequest(w, req, clientPool)
+
+	// Assert that the response status code is 200.
+	assert.Equal(t, http.StatusConflict, w.Result().StatusCode)
+}
+
+func TestErrorPostRequest(t *testing.T) {
+	// Create a mock controller
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	// Create the mock client using the mock controller
+	mockClient := NewMockRawKVClientInterface(ctrl)
+
+	// Mock client pool.
+	clientPool := make(chan RawKVClientInterface, 1)
+	clientPool <- mockClient
+	defer close(clientPool)
+
+	// Mock the Scan method to return a slice of keys.
+	mockKeys := [][]byte{
+		[]byte("blob:1"),
+		[]byte("blob:2"),
+		[]byte("blob:3"),
+	}
+
+	mockClient.EXPECT().Scan(context.Background(), []byte("blob:"), []byte("blob:~"), 100).Return(mockKeys, nil, nil)
+
+	// Mock the Get method to return different values for each key to simulate that the blob doesn't exist.
+	mockClient.EXPECT().Get(context.Background(), gomock.Any()).Return([]byte("notPostMe"), nil).AnyTimes()
+
+	expectedBlobForPost := "postBlobValue"
+	// Mock the Put method to save the blob.
+	mockClient.EXPECT().Put(context.Background(), gomock.Any(), []byte(expectedBlobForPost)).Return(errors.New("failed to retrieve blobs"))
+	// Mock the Put method for the POST request to save the blob.
+
+	// Create a mock response writer.
+	w := httptest.NewRecorder()
+
+	// Mock request with HTTP POST method.
+	req, err := http.NewRequest(http.MethodPost, "/?blob=postBlobValue", nil)
+	assert.NoError(t, err)
+
+	// Handle the request.
+	handleRequest(w, req, clientPool)
+
+	// Assert that the response status code is 200.
+	assert.Equal(t, http.StatusInternalServerError, w.Result().StatusCode)
+}
+
 // Valid DELETE request
 func TestValidDeleteRequest(t *testing.T) {
 	// Create a mock controller
@@ -1094,7 +1250,7 @@ func TestHandleGETEmptyAction(t *testing.T) {
 	mockClient := NewMockRawKVClientInterface(ctrl)
 
 	// Set up a common expectation for the Scan method
-	mockKeys := [][]byte{[]byte("key1"), []byte("key2")}
+	mockKeys := [][]byte{[]byte("key1")}
 	mockClient.EXPECT().Scan(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(mockKeys, nil, nil).AnyTimes()
 
 	// Set up an expectation for the Get method for the "random" action
@@ -1547,4 +1703,25 @@ func TestSaveBlobWithEmptyString(t *testing.T) {
 	if rr.Body.String() != expectedBody {
 		t.Errorf("Expected response body %q, got %q", expectedBody, rr.Body.String())
 	}
+}
+
+// /Additional tests to simulate errors on scan
+func TestGetAllScanError(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockClient := NewMockRawKVClientInterface(ctrl)
+	mockClient.EXPECT().Scan(gomock.Any(), []byte("blob:"), []byte("blob:~"), 100).Return(nil, nil, errors.New("failed to retrieve blobs"))
+
+	req, err := http.NewRequest(http.MethodGet, "/all", nil)
+	if err != nil {
+		t.Fatalf("Failed to create request: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+
+	handleGETAll(w, req, mockClient)
+
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assert.Equal(t, "Failed to retrieve blobs\n", w.Body.String())
 }

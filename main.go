@@ -171,12 +171,6 @@ func handleRequest(w http.ResponseWriter, r *http.Request, clientPool chan RawKV
 		clientPool <- client
 	}()
 
-	if clientPool == nil {
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
-		log.Println("Internal server error: clientPool empty")
-		return
-	}
-
 	switch r.Method {
 	case http.MethodGet:
 		handleGET(w, r, client)
