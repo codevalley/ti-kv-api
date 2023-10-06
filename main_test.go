@@ -1076,6 +1076,175 @@ func TestValidDeleteRequest(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Result().StatusCode)
 }
 
+func TestInvalidDeleteRequest(t *testing.T) {
+	// Create a mock controller
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	// Create the mock client using the mock controller
+	mockClient := NewMockRawKVClientInterface(ctrl)
+
+	// Mock client pool.
+	clientPool := make(chan RawKVClientInterface, 1)
+	clientPool <- mockClient
+	defer close(clientPool)
+
+	// Mock the Scan method to return a slice of keys.
+	mockKeys := [][]byte{
+		[]byte("blob:1"),
+		[]byte("blob:2"),
+		[]byte("blob:3"),
+	}
+	mockClient.EXPECT().Scan(context.Background(), []byte("blob:"), []byte("blob:~"), 100).Return(mockKeys, nil, nil)
+
+	// Mock the Get method for each key.
+	// For the first key, return a blob that doesn't match the one in the request.
+	mockClient.EXPECT().Get(context.Background(), mockKeys[0]).Return([]byte("notTheBlobToDelete"), nil)
+
+	// For the second key, return the blob that matches the one in the request.
+	mockClient.EXPECT().Get(context.Background(), mockKeys[1]).Return([]byte("deleteMe"), nil)
+
+	// For the third key, return another blob that doesn't match the one in the request.
+	// This expectation might not be called, so we use AnyTimes().
+	mockClient.EXPECT().Get(context.Background(), mockKeys[2]).Return([]byte("anotherBlob"), nil).AnyTimes()
+
+	// Create a mock response writer.
+	w := httptest.NewRecorder()
+
+	// Mock request with HTTP DELETE method.
+	req, err := http.NewRequest(http.MethodDelete, "/?blob=wrong", nil)
+	assert.NoError(t, err)
+
+	// Handle the request.
+	handleRequest(w, req, clientPool)
+
+	// Assert that the response status code is 200.
+	assert.Equal(t, http.StatusNotFound, w.Result().StatusCode)
+}
+
+func TestScanErrorDeleteRequest(t *testing.T) {
+	// Create a mock controller
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	// Create the mock client using the mock controller
+	mockClient := NewMockRawKVClientInterface(ctrl)
+
+	// Mock client pool.
+	clientPool := make(chan RawKVClientInterface, 1)
+	clientPool <- mockClient
+	defer close(clientPool)
+
+	// Mock the Scan method to return a slice of keys.
+	mockKeys := [][]byte{
+		[]byte("blob:1"),
+		[]byte("blob:2"),
+		[]byte("blob:3"),
+	}
+	mockClient.EXPECT().Scan(context.Background(), []byte("blob:"), []byte("blob:~"), 100).Return(mockKeys, nil, errors.New("failed to retrieve blobs"))
+
+	// Create a mock response writer.
+	w := httptest.NewRecorder()
+
+	// Mock request with HTTP DELETE method.
+	req, err := http.NewRequest(http.MethodDelete, "/?blob=deleteMe", nil)
+	assert.NoError(t, err)
+
+	// Handle the request.
+	handleRequest(w, req, clientPool)
+
+	// Assert that the response status code is 200.
+	assert.Equal(t, http.StatusInternalServerError, w.Result().StatusCode)
+}
+
+func TestGetErrorDeleteRequest(t *testing.T) {
+	// Create a mock controller
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	// Create the mock client using the mock controller
+	mockClient := NewMockRawKVClientInterface(ctrl)
+
+	// Mock client pool.
+	clientPool := make(chan RawKVClientInterface, 1)
+	clientPool <- mockClient
+	defer close(clientPool)
+
+	// Mock the Scan method to return a slice of keys.
+	mockKeys := [][]byte{
+		[]byte("blob:1"),
+		[]byte("blob:2"),
+		[]byte("blob:3"),
+	}
+	mockClient.EXPECT().Scan(context.Background(), []byte("blob:"), []byte("blob:~"), 100).Return(mockKeys, nil, nil)
+
+	// Mock the Get method for each key.
+	// For the first key, return a blob that doesn't match the one in the request.
+	mockClient.EXPECT().Get(context.Background(), mockKeys[0]).Return([]byte("notTheBlobToDelete"), errors.New("Failed to retrieve blob"))
+
+	// Create a mock response writer.
+	w := httptest.NewRecorder()
+
+	// Mock request with HTTP DELETE method.
+	req, err := http.NewRequest(http.MethodDelete, "/?blob=deleteMe", nil)
+	assert.NoError(t, err)
+
+	// Handle the request.
+	handleRequest(w, req, clientPool)
+
+	// Assert that the response status code is 200.
+	assert.Equal(t, http.StatusInternalServerError, w.Result().StatusCode)
+}
+
+func TestDeleteErrorDeleteRequest(t *testing.T) {
+	// Create a mock controller
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	// Create the mock client using the mock controller
+	mockClient := NewMockRawKVClientInterface(ctrl)
+
+	// Mock client pool.
+	clientPool := make(chan RawKVClientInterface, 1)
+	clientPool <- mockClient
+	defer close(clientPool)
+
+	// Mock the Scan method to return a slice of keys.
+	mockKeys := [][]byte{
+		[]byte("blob:1"),
+		[]byte("blob:2"),
+		[]byte("blob:3"),
+	}
+	mockClient.EXPECT().Scan(context.Background(), []byte("blob:"), []byte("blob:~"), 100).Return(mockKeys, nil, nil)
+
+	// Mock the Get method for each key.
+	// For the first key, return a blob that doesn't match the one in the request.
+	mockClient.EXPECT().Get(context.Background(), mockKeys[0]).Return([]byte("notTheBlobToDelete"), nil)
+
+	// For the second key, return the blob that matches the one in the request.
+	mockClient.EXPECT().Get(context.Background(), mockKeys[1]).Return([]byte("deleteMe"), nil)
+
+	// For the third key, return another blob that doesn't match the one in the request.
+	// This expectation might not be called, so we use AnyTimes().
+	mockClient.EXPECT().Get(context.Background(), mockKeys[2]).Return([]byte("anotherBlob"), nil).AnyTimes()
+
+	// Mock the Delete method to delete the blob.
+	mockClient.EXPECT().Delete(context.Background(), mockKeys[1]).Return(errors.New("Failed to retrieve blob"))
+
+	// Create a mock response writer.
+	w := httptest.NewRecorder()
+
+	// Mock request with HTTP DELETE method.
+	req, err := http.NewRequest(http.MethodDelete, "/?blob=deleteMe", nil)
+	assert.NoError(t, err)
+
+	// Handle the request.
+	handleRequest(w, req, clientPool)
+
+	// Assert that the response status code is 200.
+	assert.Equal(t, http.StatusInternalServerError, w.Result().StatusCode)
+}
+
 // Empty clientPool
 func TestEmptyClientPool(t *testing.T) {
 	// Create a mock controller
