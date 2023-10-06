@@ -413,6 +413,99 @@ func TestHandlePUT(t *testing.T) {
 	assert.Equal(t, "newValue", resp["blob"])
 }
 
+func TestPutErrorHandlePUT(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	// Create a mock response writer.
+	w := httptest.NewRecorder()
+
+	// Create a mock client.
+	mockClient := NewMockRawKVClientInterface(ctrl)
+
+	// Mock request with oldBlob and newBlob query parameters.
+	req, err := http.NewRequest("PUT", "/?oldBlob=oldValue&newBlob=newValue", nil)
+	assert.NoError(t, err)
+
+	// Mock the Scan method to return a slice of keys.
+	mockKeys := [][]byte{
+		[]byte("blob:1"),
+		[]byte("blob:2"),
+		[]byte("blob:3"),
+	}
+	mockClient.EXPECT().Scan(context.Background(), []byte("blob:"), []byte("blob:~"), 100).Return(mockKeys, nil, nil)
+
+	// Mock the Get method to return the old value for the key "blob:1".
+	mockClient.EXPECT().Get(context.Background(), mockKeys[0]).Return([]byte("oldValue"), nil)
+
+	// Mock the Put method to update the blob for the key "blob:1".
+	mockClient.EXPECT().Put(context.Background(), mockKeys[0], []byte("newValue")).Return(errors.New("Failed to update blob"))
+
+	// Handle the request.
+	handlePUT(w, req, mockClient)
+
+	// Assert that the response status code is 200.
+	assert.Equal(t, http.StatusInternalServerError, w.Result().StatusCode)
+}
+
+func TestMatchErrorHandlePUT(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	// Create a mock response writer.
+	w := httptest.NewRecorder()
+
+	// Create a mock client.
+	mockClient := NewMockRawKVClientInterface(ctrl)
+
+	// Mock request with oldBlob and newBlob query parameters.
+	req, err := http.NewRequest("PUT", "/?oldBlob=oldValue&newBlob=newValue", nil)
+	assert.NoError(t, err)
+
+	// Mock the Scan method to return a slice of keys.
+	mockKeys := [][]byte{
+		[]byte("blob:1"),
+	}
+	mockClient.EXPECT().Scan(context.Background(), []byte("blob:"), []byte("blob:~"), 100).Return(mockKeys, nil, nil)
+
+	// Mock the Get method to return the old value for the key "blob:1".
+	mockClient.EXPECT().Get(context.Background(), mockKeys[0]).Return([]byte("oldestValue"), nil)
+	// Handle the request.
+	handlePUT(w, req, mockClient)
+
+	// Assert that the response status code is 200.
+	assert.Equal(t, http.StatusNotFound, w.Result().StatusCode)
+}
+
+func TestGetErrorHandlePUT(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	// Create a mock response writer.
+	w := httptest.NewRecorder()
+
+	// Create a mock client.
+	mockClient := NewMockRawKVClientInterface(ctrl)
+
+	// Mock request with oldBlob and newBlob query parameters.
+	req, err := http.NewRequest("PUT", "/?oldBlob=oldValue&newBlob=newValue", nil)
+	assert.NoError(t, err)
+
+	// Mock the Scan method to return a slice of keys.
+	mockKeys := [][]byte{
+		[]byte("blob:1"),
+	}
+	mockClient.EXPECT().Scan(context.Background(), []byte("blob:"), []byte("blob:~"), 100).Return(mockKeys, nil, nil)
+
+	// Mock the Get method to return the old value for the key "blob:1".
+	mockClient.EXPECT().Get(context.Background(), mockKeys[0]).Return([]byte("oldestValue"), errors.New("Failed to get blob"))
+	// Handle the request.
+	handlePUT(w, req, mockClient)
+
+	// Assert that the response status code is 200.
+	assert.Equal(t, http.StatusInternalServerError, w.Result().StatusCode)
+}
+
 func TestInvalidRequestMethod(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
