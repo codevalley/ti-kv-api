@@ -239,7 +239,7 @@ func handlePOST(w http.ResponseWriter, r *http.Request, client RawKVClientInterf
 
 	// Return the saved blob as JSON
 	resp := map[string]string{"blob": blob}
-	jsonResp, err := json.Marshal(resp)
+	jsonResp, _ := json.Marshal(resp)
 	// if err != nil {
 	// 	http.Error(w, "Failed to marshal response", http.StatusInternalServerError)
 	// 	log.Printf("Failed to marshal response: %v", err)
@@ -292,7 +292,7 @@ func handleDELETE(w http.ResponseWriter, r *http.Request, client RawKVClientInte
 
 	// Return success message as JSON
 	resp := map[string]string{"message": "Blob deleted successfully"}
-	jsonResp, err := json.Marshal(resp)
+	jsonResp, _ := json.Marshal(resp)
 	// if err != nil {
 	// 	http.Error(w, "Failed to marshal response", http.StatusInternalServerError)
 	// 	log.Printf("Failed to marshal response: %v", err)
@@ -351,7 +351,7 @@ func handlePUT(w http.ResponseWriter, r *http.Request, client RawKVClientInterfa
 
 	// Return the updated blob as JSON
 	resp := map[string]string{"blob": newBlob}
-	jsonResp, err := json.Marshal(resp)
+	jsonResp, _ := json.Marshal(resp)
 	// if err != nil {
 	// 	http.Error(w, "Failed to marshal response", http.StatusInternalServerError)
 	// 	log.Printf("Failed to marshal response: %v", err)
@@ -364,7 +364,7 @@ func handlePUT(w http.ResponseWriter, r *http.Request, client RawKVClientInterfa
 func handleGETCount(w http.ResponseWriter, client RawKVClientInterface) {
 	count := countBlobs(client)
 	resp := map[string]int{"count": count}
-	jsonResp, err := json.Marshal(resp)
+	jsonResp, _ := json.Marshal(resp)
 	// if err != nil {
 	// 	http.Error(w, "Failed to marshal response", http.StatusInternalServerError)
 	// 	log.Printf("Failed to marshal response: %v", err)
@@ -401,7 +401,7 @@ func handleGETAll(w http.ResponseWriter, r *http.Request, client RawKVClientInte
 
 	// Return all blobs as JSON array
 	resp := map[string][]string{"blobs": blobs}
-	jsonResp, err := json.Marshal(resp)
+	jsonResp, _ := json.Marshal(resp)
 	// if err != nil {
 	// 	http.Error(w, "Failed to marshal response", http.StatusInternalServerError)
 	// 	log.Printf("Failed to marshal response: %v", err)
@@ -438,7 +438,7 @@ func handleGETRandom(w http.ResponseWriter, r *http.Request, client RawKVClientI
 
 	// Return the blob (either provided or retrieved) as JSON
 	resp := map[string]string{"blob": blob}
-	jsonResp, err := json.Marshal(resp)
+	jsonResp, _ := json.Marshal(resp)
 	// if err != nil {
 	// 	http.Error(w, "Failed to marshal response", http.StatusInternalServerError)
 	// 	log.Printf("Failed to marshal response: %v", err)
