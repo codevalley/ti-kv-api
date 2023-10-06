@@ -1515,3 +1515,36 @@ func TestHandleGET_ValidAction(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Result().StatusCode)
 	})
 }
+
+////////////////////////////////////////////////////////////////
+///// Test main() method//
+////////////////////////////////////////////////////////////////
+
+// Save a blob with an empty string
+func TestSaveBlobWithEmptyString(t *testing.T) {
+	// Mock the client
+	client := NewMockRawKVClientInterface(nil)
+
+	// Create a new request with an empty blob
+	req, err := http.NewRequest(http.MethodPost, "/?blob=", nil)
+	if err != nil {
+		t.Fatalf("Failed to create request: %v", err)
+	}
+
+	// Create a response recorder to capture the response
+	rr := httptest.NewRecorder()
+
+	// Call the handlePOST function with the mock client
+	handlePOST(rr, req, client)
+
+	// Check the response status code
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("Expected status code %d, got %d", http.StatusBadRequest, rr.Code)
+	}
+
+	// Check the response body
+	expectedBody := "No blob provided\n"
+	if rr.Body.String() != expectedBody {
+		t.Errorf("Expected response body %q, got %q", expectedBody, rr.Body.String())
+	}
+}
