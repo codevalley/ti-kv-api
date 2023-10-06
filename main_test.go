@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -186,7 +187,7 @@ func TestHandleRequest(t *testing.T) {
 
 func TestSetupLogging(t *testing.T) {
 	// Call the setupLogging function.
-	logger := setupLogging()
+	logger := setupLogging(LogFile)
 	assert.NotNil(t, logger)
 
 	// Assert that the logging subsystem is initialized.
@@ -267,87 +268,6 @@ func TestSetupMonitoring(t *testing.T) {
 	if !strings.Contains(buf.String(), expectedLog) {
 		t.Errorf("Expected log to contain %q, but got %q", expectedLog, buf.String())
 	}
-}
-
-func TestHandleGET(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
-	// Create a mock client.
-	mockClient := NewMockRawKVClientInterface(ctrl)
-
-	// Set up a common expectation for the Scan method
-	mockKeys := [][]byte{[]byte("key1"), []byte("key2")}
-	mockClient.EXPECT().Scan(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(mockKeys, nil, nil).AnyTimes()
-
-	// Set up an expectation for the Get method for the "all" action
-	mockValue := []byte("value1")
-	mockClient.EXPECT().Get(gomock.Any(), gomock.Eq(mockKeys[0])).Return(mockValue, nil).AnyTimes()
-	mockClient.EXPECT().Get(gomock.Any(), gomock.Eq(mockKeys[1])).Return(mockValue, nil).AnyTimes()
-
-	// Test for action "count"
-	t.Run("action=count", func(t *testing.T) {
-		// Create a mock response writer.
-		w := httptest.NewRecorder()
-
-		// Mock request with action=count query parameter.
-		req, err := http.NewRequest("GET", "/?action=count", nil)
-		assert.NoError(t, err)
-
-		// Handle the request.
-		handleGET(w, req, mockClient)
-
-		// Assert that the response status code is 200.
-		assert.Equal(t, http.StatusOK, w.Result().StatusCode)
-	})
-
-	// Test for action "all"
-	t.Run("action=all", func(t *testing.T) {
-		// Create a mock response writer.
-		w := httptest.NewRecorder()
-
-		// Mock request with action=all query parameter.
-		req, err := http.NewRequest("GET", "/?action=all", nil)
-		assert.NoError(t, err)
-
-		// Handle the request.
-		handleGET(w, req, mockClient)
-
-		// Assert that the response status code is 200.
-		assert.Equal(t, http.StatusOK, w.Result().StatusCode)
-	})
-
-	// Test for action "random"
-	t.Run("action=random", func(t *testing.T) {
-		// Create a mock response writer.
-		w := httptest.NewRecorder()
-
-		// Mock request with action=random query parameter.
-		req, err := http.NewRequest("GET", "/?action=random", nil)
-		assert.NoError(t, err)
-
-		// Handle the request.
-		handleGET(w, req, mockClient)
-
-		// Assert that the response status code is 200.
-		assert.Equal(t, http.StatusOK, w.Result().StatusCode)
-	})
-
-	// Test for no action (defaults to "random")
-	t.Run("no action", func(t *testing.T) {
-		// Create a mock response writer.
-		w := httptest.NewRecorder()
-
-		// Mock request without any action query parameter.
-		req, err := http.NewRequest("GET", "/", nil)
-		assert.NoError(t, err)
-
-		// Handle the request.
-		handleGET(w, req, mockClient)
-
-		// Assert that the response status code is 200.
-		assert.Equal(t, http.StatusOK, w.Result().StatusCode)
-	})
 }
 
 func TestHandlePOST(t *testing.T) {
@@ -493,123 +413,6 @@ func TestHandlePUT(t *testing.T) {
 	assert.Equal(t, "newValue", resp["blob"])
 }
 
-func TestHandleGETCount(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
-	// Create a mock response writer.
-	w := httptest.NewRecorder()
-
-	// Create a mock client.
-	mockClient := NewMockRawKVClientInterface(ctrl)
-
-	// Mock the behavior of countBlobs function.
-	// For simplicity, let's assume countBlobs uses the Scan method of the client.
-	// You can adjust this based on the actual implementation of countBlobs.
-	mockKeys := [][]byte{
-		[]byte("blob:1"),
-		[]byte("blob:2"),
-		[]byte("blob:3"),
-	}
-	mockClient.EXPECT().Scan(context.Background(), []byte("blob:"), []byte("blob:~"), 100).Return(mockKeys, nil, nil)
-
-	// Handle the request.
-	handleGETCount(w, mockClient)
-
-	// Assert that the response status code is 200.
-	assert.Equal(t, http.StatusOK, w.Result().StatusCode)
-
-	// Assert that the response body contains the expected count.
-	var resp map[string]int
-	err := json.Unmarshal(w.Body.Bytes(), &resp)
-	assert.NoError(t, err)
-	assert.Equal(t, len(mockKeys), resp["count"])
-}
-
-func TestHandleGETAll(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
-	// Create a mock request.
-	req, err := http.NewRequest("GET", "/?action=all", nil)
-	assert.NoError(t, err)
-
-	// Create a mock response writer.
-	w := httptest.NewRecorder()
-
-	// Create a mock client.
-	mockClient := NewMockRawKVClientInterface(ctrl)
-
-	// Mock the Scan method to return a slice of keys
-	mockKeys := [][]byte{
-		[]byte("blob:1"),
-		[]byte("blob:2"),
-		[]byte("blob:3"),
-	}
-	mockClient.EXPECT().Scan(context.Background(), []byte("blob:"), []byte("blob:~"), 100).Return(mockKeys, nil, nil)
-
-	// Mock the Get method to return a value for each key
-	mockValues := [][]byte{
-		[]byte("value1"),
-		[]byte("value2"),
-		[]byte("value3"),
-	}
-	for i, key := range mockKeys {
-		mockClient.EXPECT().Get(context.Background(), key).Return(mockValues[i], nil)
-	}
-
-	// Handle the request.
-	handleGETAll(w, req, mockClient)
-
-	// Assert that the response status code is 200.
-	assert.Equal(t, http.StatusOK, w.Result().StatusCode)
-
-	// Assert that the response body contains the mocked values.
-	var resp map[string][]string
-	err = json.Unmarshal(w.Body.Bytes(), &resp)
-	assert.NoError(t, err)
-	assert.ElementsMatch(t, []string{"value1", "value2", "value3"}, resp["blobs"])
-}
-
-func TestHandleGETRandom(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
-	// Create a mock request.
-	req, err := http.NewRequest("GET", "/?action=random", nil)
-	assert.NoError(t, err)
-
-	// Create a mock response writer.
-	w := httptest.NewRecorder()
-
-	// Create a mock client.
-	mockClient := NewMockRawKVClientInterface(ctrl)
-
-	// Mock the Scan method to return a slice of keys
-	mockKeys := [][]byte{
-		[]byte("blob:1"),
-		[]byte("blob:2"),
-		[]byte("blob:3"),
-	}
-	mockClient.EXPECT().Scan(context.Background(), []byte("blob:"), []byte("blob:~"), 100).Return(mockKeys, nil, nil)
-
-	// Mock the Get method to return a value for a random key
-	mockValue := []byte("mocked value")
-	mockClient.EXPECT().Get(context.Background(), gomock.Any()).Return(mockValue, nil)
-
-	// Handle the request.
-	handleGETRandom(w, req, mockClient)
-
-	// Assert that the response status code is 200.
-	assert.Equal(t, http.StatusOK, w.Result().StatusCode)
-
-	// Assert that the response body contains the mocked value.
-	var resp map[string]string
-	err = json.Unmarshal(w.Body.Bytes(), &resp)
-	assert.NoError(t, err)
-	assert.Equal(t, "mocked value", resp["blob"])
-}
-
 func TestInvalidRequestMethod(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
@@ -667,6 +470,11 @@ func TestCountBlobs(t *testing.T) {
 }
 
 // //////New test cases////////////
+// - SetupServer
+// - SetupClientPool
+// - handlePOST
+// - handleDELETE
+
 // Creates a new http.ServeMux instance
 func TestSetupServer_ClientPoolIsNil(t *testing.T) {
 	mux := setupServer(nil)
@@ -791,4 +599,919 @@ func TestHandleDELETEReturnsErrorIfNoBlobProvided(t *testing.T) {
 	// Assert that the response writer received the correct response
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 	assert.Equal(t, "No blob provided\n", w.Body.String())
+}
+
+////////////////////////////////////////////////////////////////
+// getClientFromPool tests
+
+// Returns a RawKVClientInterface from the clientPool
+func TestReturnsRawKVClientInterfaceFromPool(t *testing.T) {
+	client := &MockRawKVClientInterface{}
+	clientPool := make(chan RawKVClientInterface, 1)
+	clientPool <- client
+
+	result := getClientFromPool(clientPool)
+
+	if result != client {
+		t.Errorf("Expected %v, but got %v", client, result)
+	}
+}
+
+// Returns a RawKVClientInterface after multiple calls to getClientFromPool
+func TestReturnsRawKVClientInterfaceAfterMultipleCalls(t *testing.T) {
+	client1 := &MockRawKVClientInterface{}
+	client2 := &MockRawKVClientInterface{}
+	clientPool := make(chan RawKVClientInterface, 2)
+	clientPool <- client1
+	clientPool <- client2
+
+	result1 := getClientFromPool(clientPool)
+	result2 := getClientFromPool(clientPool)
+
+	if result1 != client1 {
+		t.Errorf("Expected %v, but got %v", client1, result1)
+	}
+	if result2 != client2 {
+		t.Errorf("Expected %v, but got %v", client2, result2)
+	}
+}
+
+// Returns a RawKVClientInterface after adding and removing clients from the clientPool
+func TestReturnsRawKVClientInterfaceAfterAddingAndRemovingClients(t *testing.T) {
+	client1 := &MockRawKVClientInterface{}
+	client2 := &MockRawKVClientInterface{}
+	clientPool := make(chan RawKVClientInterface, 2)
+	clientPool <- client1
+	clientPool <- client2
+
+	result1 := getClientFromPool(clientPool)
+	result2 := getClientFromPool(clientPool)
+
+	if result1 != client1 {
+		t.Errorf("Expected %v, but got %v", client1, result1)
+	}
+	if result2 != client2 {
+		t.Errorf("Expected %v, but got %v", client2, result2)
+	}
+
+	client3 := &MockRawKVClientInterface{}
+	clientPool <- client3
+
+	result3 := getClientFromPool(clientPool)
+
+	if result3 != client3 {
+		t.Errorf("Expected %v, but got %v", client3, result3)
+	}
+}
+
+// Returns a RawKVClientInterface after adding more clients to the clientPool than ClientPoolSize
+func TestReturnsRawKVClientInterfaceAfterAddingMoreClientsThanPoolSize(t *testing.T) {
+	client1 := &MockRawKVClientInterface{}
+	client2 := &MockRawKVClientInterface{}
+	client3 := &MockRawKVClientInterface{}
+	client4 := &MockRawKVClientInterface{}
+	clientPool := make(chan RawKVClientInterface, 2)
+	clientPool <- client1
+	clientPool <- client2
+
+	result1 := getClientFromPool(clientPool)
+	result2 := getClientFromPool(clientPool)
+
+	if result1 != client1 {
+		t.Errorf("Expected %v, but got %v", client1, result1)
+	}
+	if result2 != client2 {
+		t.Errorf("Expected %v, but got %v", client2, result2)
+	}
+
+	clientPool <- client3
+	clientPool <- client4
+
+	result3 := getClientFromPool(clientPool)
+	result4 := getClientFromPool(clientPool)
+
+	if result3 != client3 {
+		t.Errorf("Expected %v, but got %v", client3, result3)
+	}
+	if result4 != client4 {
+		t.Errorf("Expected %v, but got %v", client4, result4)
+	}
+}
+
+////////////////////////////////////////////////////////////////
+// test SetupLogging
+
+// Function returns a valid logger object
+func TestSetupLoggingReturnsValidLoggerObject(t *testing.T) {
+	logname := "test1.log"
+	logger := setupLogging(logname)
+	if logger == nil {
+		t.Errorf("Expected logger to not be nil")
+	}
+}
+
+// Function creates a new log file if it doesn't exist
+func TestSetupLoggingCreatesNewLogFile(t *testing.T) {
+	logname := "test.log"
+	_ = os.Remove(logname)
+	_ = setupLogging(logname)
+	_, err := os.Stat(logname)
+	if os.IsNotExist(err) {
+		t.Errorf("Expected log file to be created")
+	}
+}
+
+// Function appends to an existing log file
+func TestSetupLoggingAppendsToExistingLogFile(t *testing.T) {
+	logname := "test2.log"
+	_ = os.Remove(logname)
+	logger1 := setupLogging(logname)
+	logger1.Println("Log message 1")
+	logger2 := setupLogging(logname)
+	logger2.Println("Log message 2")
+	file, err := os.Open(logname)
+	if err != nil {
+		t.Errorf("Failed to open log file: %v", err)
+	}
+	defer file.Close()
+	scanner := bufio.NewScanner(file)
+	var lines []string
+	for scanner.Scan() {
+		lines = append(lines, scanner.Text())
+	}
+	//instead of != we are doing !contains, because logger.printLn adds timestamp to the log message
+	if len(lines) != 2 {
+		t.Errorf("Expected log file to have 2 lines, got %d", len(lines))
+	}
+	if !strings.Contains(lines[0], "Log message 1") {
+		t.Errorf("Expected first line to be 'Log message 1', got '%s'", lines[0])
+	}
+	if !strings.Contains(lines[1], "Log message 2") {
+		t.Errorf("Expected second line to be 'Log message 2', got '%s'", lines[1])
+	}
+}
+
+// Function fails to open log file
+func TestSetupLoggingFailsToOpenLogFile(t *testing.T) {
+	logname := "/root/test2.log"
+	logger := setupLogging(logname)
+	if logger != nil {
+		t.Errorf("Expected logger to be nil")
+	}
+}
+
+// Function fails to create log file
+func TestSetupLoggingFailsToCreateLogFile(t *testing.T) {
+	logname := "/root/test3.log"
+	logger := setupLogging(logname)
+	if logger != nil {
+		t.Errorf("Expected logger to be nil")
+	}
+}
+
+// Function fails to write to log file
+func TestSetupLoggingFailsToWriteToLogFile(t *testing.T) {
+	logname := "test1.log"
+	file, err := os.OpenFile(logname, os.O_RDONLY, 0644)
+	if err != nil {
+		t.Fatalf("Failed to open log file: %v", err)
+	}
+	file.Close()
+	logger := setupLogging(logname)
+	logger.Println("Log message")
+	// No assertion can be made since the log message will not be written
+}
+
+////////////////////////////////////////////////////////////////
+/// test handleRequest()
+
+// Valid GET request
+func TestValidGetRequest(t *testing.T) {
+	// Create a mock controller
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	// Create the mock client using the mock controller
+	mockClient := NewMockRawKVClientInterface(ctrl)
+
+	// Mock client pool.
+	clientPool := make(chan RawKVClientInterface, 1)
+	clientPool <- mockClient
+	defer close(clientPool)
+
+	// Mock the Scan method to return a slice of keys.
+	mockKeys := [][]byte{
+		[]byte("blob:1"),
+		[]byte("blob:2"),
+		[]byte("blob:3"),
+	}
+	// Mock the Get method for the GET request.
+	mockClient.EXPECT().Get(gomock.Any(), gomock.Any()).Return([]byte("randomValue"), nil).AnyTimes()
+
+	// Mock the Scan method for the GET request.
+	mockClient.EXPECT().Scan(context.Background(), []byte("blob:"), []byte("blob:~"), 100).Return(mockKeys, nil, nil)
+
+	// Create a mock response writer.
+	w := httptest.NewRecorder()
+
+	// Mock request with HTTP GET method.
+	req, err := http.NewRequest(http.MethodGet, "/", nil)
+	assert.NoError(t, err)
+
+	// Handle the request.
+	handleRequest(w, req, clientPool)
+
+	// Assert that the response status code is 200.
+	assert.Equal(t, http.StatusOK, w.Result().StatusCode)
+}
+
+// Valid POST request
+func TestValidPostRequest(t *testing.T) {
+	// Create a mock controller
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	// Create the mock client using the mock controller
+	mockClient := NewMockRawKVClientInterface(ctrl)
+
+	// Mock client pool.
+	clientPool := make(chan RawKVClientInterface, 1)
+	clientPool <- mockClient
+	defer close(clientPool)
+
+	// Mock the Scan method to return a slice of keys.
+	mockKeys := [][]byte{
+		[]byte("blob:1"),
+		[]byte("blob:2"),
+		[]byte("blob:3"),
+	}
+
+	mockClient.EXPECT().Scan(context.Background(), []byte("blob:"), []byte("blob:~"), 100).Return(mockKeys, nil, nil)
+
+	// Mock the Get method to return different values for each key to simulate that the blob doesn't exist.
+	mockClient.EXPECT().Get(context.Background(), gomock.Any()).Return([]byte("notPostMe"), nil).AnyTimes()
+
+	expectedBlobForPost := "postBlobValue"
+	// Mock the Put method to save the blob.
+	mockClient.EXPECT().Put(context.Background(), gomock.Any(), []byte(expectedBlobForPost)).Return(nil)
+	// Mock the Put method for the POST request to save the blob.
+
+	// Create a mock response writer.
+	w := httptest.NewRecorder()
+
+	// Mock request with HTTP POST method.
+	req, err := http.NewRequest(http.MethodPost, "/?blob=postBlobValue", nil)
+	assert.NoError(t, err)
+
+	// Handle the request.
+	handleRequest(w, req, clientPool)
+
+	// Assert that the response status code is 200.
+	assert.Equal(t, http.StatusOK, w.Result().StatusCode)
+}
+
+// Valid DELETE request
+func TestValidDeleteRequest(t *testing.T) {
+	// Create a mock controller
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	// Create the mock client using the mock controller
+	mockClient := NewMockRawKVClientInterface(ctrl)
+
+	// Mock client pool.
+	clientPool := make(chan RawKVClientInterface, 1)
+	clientPool <- mockClient
+	defer close(clientPool)
+
+	// Mock the Scan method to return a slice of keys.
+	mockKeys := [][]byte{
+		[]byte("blob:1"),
+		[]byte("blob:2"),
+		[]byte("blob:3"),
+	}
+	mockClient.EXPECT().Scan(context.Background(), []byte("blob:"), []byte("blob:~"), 100).Return(mockKeys, nil, nil)
+
+	// Mock the Get method for each key.
+	// For the first key, return a blob that doesn't match the one in the request.
+	mockClient.EXPECT().Get(context.Background(), mockKeys[0]).Return([]byte("notTheBlobToDelete"), nil)
+
+	// For the second key, return the blob that matches the one in the request.
+	mockClient.EXPECT().Get(context.Background(), mockKeys[1]).Return([]byte("deleteMe"), nil)
+
+	// For the third key, return another blob that doesn't match the one in the request.
+	// This expectation might not be called, so we use AnyTimes().
+	mockClient.EXPECT().Get(context.Background(), mockKeys[2]).Return([]byte("anotherBlob"), nil).AnyTimes()
+
+	// Mock the Delete method to delete the blob.
+	mockClient.EXPECT().Delete(context.Background(), mockKeys[1]).Return(nil)
+
+	// Create a mock response writer.
+	w := httptest.NewRecorder()
+
+	// Mock request with HTTP DELETE method.
+	req, err := http.NewRequest(http.MethodDelete, "/?blob=deleteMe", nil)
+	assert.NoError(t, err)
+
+	// Handle the request.
+	handleRequest(w, req, clientPool)
+
+	// Assert that the response status code is 200.
+	assert.Equal(t, http.StatusOK, w.Result().StatusCode)
+}
+
+// Empty clientPool
+func TestEmptyClientPool(t *testing.T) {
+	// Create a mock controller
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	// Mock client pool.
+	clientPool := make(chan RawKVClientInterface, 1)
+	defer close(clientPool)
+
+	// Create a mock response writer.
+	w := httptest.NewRecorder()
+
+	// Mock request with HTTP GET method.
+	req, err := http.NewRequest(http.MethodGet, "/", nil)
+	assert.NoError(t, err)
+
+	// Handle the request.
+	handleRequest(w, req, clientPool)
+
+	// Assert that the response status code is 500 (Internal Server Error).
+	assert.Equal(t, http.StatusInternalServerError, w.Result().StatusCode)
+}
+
+// TODO: Invalid clientPool
+// func TestInvalidClientPool(t *testing.T)
+
+// Invalid GET request
+func TestInvalidGetRequest(t *testing.T) {
+	// Create a mock controller
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	// Create the mock client using the mock controller
+	mockClient := NewMockRawKVClientInterface(ctrl)
+
+	// Mock client pool.
+	clientPool := make(chan RawKVClientInterface, 1)
+	clientPool <- mockClient
+	defer close(clientPool)
+
+	// Mock the Scan method to return a slice of keys.
+	mockKeys := [][]byte{
+		[]byte("blob:1"),
+		[]byte("blob:2"),
+		[]byte("blob:3"),
+	}
+	// Mock the Get method for the GET request.
+	mockClient.EXPECT().Get(gomock.Any(), gomock.Any()).Return(nil, errors.New("Error getting value")).AnyTimes()
+
+	// Mock the Scan method for the GET request.
+	mockClient.EXPECT().Scan(context.Background(), []byte("blob:"), []byte("blob:~"), 100).Return(mockKeys, nil, nil)
+
+	// Create a mock response writer.
+	w := httptest.NewRecorder()
+
+	// Mock request with HTTP GET method.
+	req, err := http.NewRequest(http.MethodGet, "/", nil)
+	assert.NoError(t, err)
+
+	// Handle the request.
+	handleRequest(w, req, clientPool)
+
+	// Assert that the response status code is 500 (Internal Server Error).
+	assert.Equal(t, http.StatusInternalServerError, w.Result().StatusCode)
+}
+
+////////////////////////////////////////////////////////////////
+/// test handleGET
+////////////////////////////////////////////////////////////////
+
+// Handles action "count" by calling handleGETCount with client
+func TestHandleGETCount(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	// Create a mock client.
+	mockClient := NewMockRawKVClientInterface(ctrl)
+
+	// Set up a common expectation for the Scan method
+	mockKeys := [][]byte{[]byte("key1"), []byte("key2")}
+	mockClient.EXPECT().Scan(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(mockKeys, nil, nil).AnyTimes()
+
+	// Set up an expectation for the Get method for the "count" action
+	mockValue := []byte("value1")
+	mockClient.EXPECT().Get(gomock.Any(), gomock.Eq(mockKeys[0])).Return(mockValue, nil).AnyTimes()
+	mockClient.EXPECT().Get(gomock.Any(), gomock.Eq(mockKeys[1])).Return(mockValue, nil).AnyTimes()
+
+	// Create a mock response writer.
+	w := httptest.NewRecorder()
+
+	// Mock request with action=count query parameter.
+	req, err := http.NewRequest("GET", "/?action=count", nil)
+	assert.NoError(t, err)
+
+	// Handle the request.
+	handleGET(w, req, mockClient)
+
+	// Assert that the response status code is 200.
+	assert.Equal(t, http.StatusOK, w.Result().StatusCode)
+}
+
+// Handles action "all" by calling handleGETAll with client
+func TestHandleGETAll(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	// Create a mock client.
+	mockClient := NewMockRawKVClientInterface(ctrl)
+
+	// Set up a common expectation for the Scan method
+	mockKeys := [][]byte{[]byte("key1"), []byte("key2")}
+	mockClient.EXPECT().Scan(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(mockKeys, nil, nil).AnyTimes()
+
+	// Set up an expectation for the Get method for the "all" action
+	mockValue := []byte("value1")
+	mockClient.EXPECT().Get(gomock.Any(), gomock.Eq(mockKeys[0])).Return(mockValue, nil).AnyTimes()
+	mockClient.EXPECT().Get(gomock.Any(), gomock.Eq(mockKeys[1])).Return(mockValue, nil).AnyTimes()
+
+	// Create a mock response writer.
+	w := httptest.NewRecorder()
+
+	// Mock request with action=all query parameter.
+	req, err := http.NewRequest("GET", "/?action=all", nil)
+	assert.NoError(t, err)
+
+	// Handle the request.
+	handleGET(w, req, mockClient)
+
+	// Assert that the response status code is 200.
+	assert.Equal(t, http.StatusOK, w.Result().StatusCode)
+}
+
+// Handles other actions by calling handleGETRandom with client
+func TestHandleGETRandom(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	// Create a mock client.
+	mockClient := NewMockRawKVClientInterface(ctrl)
+
+	// Set up a common expectation for the Scan method
+	mockKeys := [][]byte{[]byte("key1"), []byte("key2")}
+	mockClient.EXPECT().Scan(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(mockKeys, nil, nil).AnyTimes()
+
+	// Set up an expectation for the Get method for the "random" action
+	mockValue := []byte("value1")
+	mockClient.EXPECT().Get(gomock.Any(), gomock.Eq(mockKeys[0])).Return(mockValue, nil).AnyTimes()
+	mockClient.EXPECT().Get(gomock.Any(), gomock.Eq(mockKeys[1])).Return(mockValue, nil).AnyTimes()
+
+	// Create a mock response writer.
+	w := httptest.NewRecorder()
+
+	// Mock request with action=random query parameter.
+	req, err := http.NewRequest("GET", "/?action=random", nil)
+	assert.NoError(t, err)
+
+	// Handle the request.
+	handleGET(w, req, mockClient)
+
+	// Assert that the response status code is 200.
+	assert.Equal(t, http.StatusOK, w.Result().StatusCode)
+}
+
+// Handles empty action parameter by calling handleGETRandom with client
+// should return random blob
+func TestHandleGETEmptyAction(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	// Create a mock client.
+	mockClient := NewMockRawKVClientInterface(ctrl)
+
+	// Set up a common expectation for the Scan method
+	mockKeys := [][]byte{[]byte("key1"), []byte("key2")}
+	mockClient.EXPECT().Scan(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(mockKeys, nil, nil).AnyTimes()
+
+	// Set up an expectation for the Get method for the "random" action
+	mockValue := []byte("value1")
+	mockClient.EXPECT().Get(gomock.Any(), gomock.Eq(mockKeys[0])).Return(mockValue, nil).AnyTimes()
+
+	// Call the handleGET function with an empty action
+	req, err := http.NewRequest(http.MethodGet, "/?action=", nil)
+	if err != nil {
+		t.Fatalf("Failed to create request: %v", err)
+	}
+	rr := httptest.NewRecorder()
+	handleGET(rr, req, mockClient)
+
+	// Check the response status code
+	if rr.Code != http.StatusOK {
+		t.Errorf("Expected status code %d, but got %d", http.StatusOK, rr.Code)
+	}
+
+	// Check the response body
+	expectedBody := `{"blob":"value1"}`
+	if rr.Body.String() != expectedBody {
+		t.Errorf("Expected response body %s, but got %s", expectedBody, rr.Body.String())
+	}
+}
+
+// Returns invalid request method error if request method is not GET
+func TestHandleGET_ValidRequestMethod(t *testing.T) {
+	// Create a mock client.
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	mockClient := NewMockRawKVClientInterface(ctrl)
+	// Mock the Scan method to return a slice of keys.
+	mockKeys := [][]byte{
+		[]byte("blob:1"),
+		[]byte("blob:2"),
+		[]byte("blob:3"),
+	}
+	// Mock the Get method for the GET request.
+	mockClient.EXPECT().Get(gomock.Any(), gomock.Any()).Return([]byte("randomValue"), nil).AnyTimes()
+
+	// Mock the Scan method for the GET request.
+	mockClient.EXPECT().Scan(context.Background(), []byte("blob:"), []byte("blob:~"), 100).Return(mockKeys, nil, nil)
+	// Create a mock response writer.
+	w := httptest.NewRecorder()
+
+	// Mock request with valid request method.
+	req, err := http.NewRequest("GET", "/", nil)
+	assert.NoError(t, err)
+
+	// Handle the request.
+	handleGET(w, req, mockClient)
+
+	// Assert that the response status code is 200 (OK).
+	assert.Equal(t, http.StatusOK, w.Result().StatusCode)
+}
+
+// Logs action parameter
+func TestHandleGETLogsActionParameter(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	// Create a mock client.
+	mockClient := NewMockRawKVClientInterface(ctrl)
+
+	// Set up a common expectation for the Scan method
+	mockKeys := [][]byte{[]byte("key1"), []byte("key2")}
+	mockClient.EXPECT().Scan(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(mockKeys, nil, nil).AnyTimes()
+
+	// Set up an expectation for the Get method for the "all" action
+	mockValue := []byte("value1")
+	mockClient.EXPECT().Get(gomock.Any(), gomock.Eq(mockKeys[0])).Return(mockValue, nil).AnyTimes()
+	mockClient.EXPECT().Get(gomock.Any(), gomock.Eq(mockKeys[1])).Return(mockValue, nil).AnyTimes()
+
+	// Test for action "count"
+	t.Run("action=count", func(t *testing.T) {
+		// Create a mock response writer.
+		w := httptest.NewRecorder()
+
+		// Mock request with action=count query parameter.
+		req, err := http.NewRequest("GET", "/?action=count", nil)
+		assert.NoError(t, err)
+
+		// Handle the request.
+		handleGET(w, req, mockClient)
+
+		// Assert that the response status code is 200.
+		assert.Equal(t, http.StatusOK, w.Result().StatusCode)
+	})
+
+	// Test for action "all"
+	t.Run("action=all", func(t *testing.T) {
+		// Create a mock response writer.
+		w := httptest.NewRecorder()
+
+		// Mock request with action=all query parameter.
+		req, err := http.NewRequest("GET", "/?action=all", nil)
+		assert.NoError(t, err)
+
+		// Handle the request.
+		handleGET(w, req, mockClient)
+
+		// Assert that the response status code is 200.
+		assert.Equal(t, http.StatusOK, w.Result().StatusCode)
+	})
+
+	// Test for action "random"
+	t.Run("action=random", func(t *testing.T) {
+		// Create a mock response writer.
+		w := httptest.NewRecorder()
+
+		// Mock request with action=random query parameter.
+		req, err := http.NewRequest("GET", "/?action=random", nil)
+		assert.NoError(t, err)
+
+		// Handle the request.
+		handleGET(w, req, mockClient)
+
+		// Assert that the response status code is 200.
+		assert.Equal(t, http.StatusOK, w.Result().StatusCode)
+	})
+
+	// Test for no action (defaults to "random")
+	t.Run("no action", func(t *testing.T) {
+		// Create a mock response writer.
+		w := httptest.NewRecorder()
+
+		// Mock request without any action query parameter.
+		req, err := http.NewRequest("GET", "/", nil)
+		assert.NoError(t, err)
+
+		// Handle the request.
+		handleGET(w, req, mockClient)
+
+		// Assert that the response status code is 200.
+		assert.Equal(t, http.StatusOK, w.Result().StatusCode)
+	})
+}
+
+// Returns not found error if action parameter is "all" and there are no blobs
+func TestHandleGETWithBlobs(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	// Create a mock client.
+	mockClient := NewMockRawKVClientInterface(ctrl)
+
+	// Set up a common expectation for the Scan method
+	mockKeys := [][]byte{[]byte("key1"), []byte("key2")}
+	mockClient.EXPECT().Scan(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(mockKeys, nil, nil).AnyTimes()
+
+	// Set up an expectation for the Get method for the "all" action
+	mockValue := []byte("value1")
+	mockClient.EXPECT().Get(gomock.Any(), gomock.Eq(mockKeys[0])).Return(mockValue, nil).AnyTimes()
+	mockClient.EXPECT().Get(gomock.Any(), gomock.Eq(mockKeys[1])).Return(mockValue, nil).AnyTimes()
+
+	// Create a mock response writer.
+	w := httptest.NewRecorder()
+
+	// Mock request with action=all query parameter.
+	req, err := http.NewRequest("GET", "/?action=all", nil)
+	assert.NoError(t, err)
+
+	// Handle the request.
+	handleGET(w, req, mockClient)
+
+	// Assert that the response status code is 200.
+	assert.Equal(t, http.StatusOK, w.Result().StatusCode)
+}
+
+// Handles error from handleGETCount by returning internal server error
+//TODO: TestHandleGETCountError
+
+//TODO: TestHandleGETAllError
+
+// Handles error from handleGETRandom by returning internal server error
+func TestHandleGETRandomError(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	// Create a mock client.
+	mockClient := NewMockRawKVClientInterface(ctrl)
+
+	// Set up a common expectation for the Scan method
+	mockKeys := [][]byte{[]byte("key1"), []byte("key2")}
+	mockClient.EXPECT().Scan(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(mockKeys, nil, nil).AnyTimes()
+
+	// Set up an expectation for the Get method for the "all" action
+	mockValue := []byte("value1")
+	mockClient.EXPECT().Get(gomock.Any(), gomock.Eq(mockKeys[0])).Return(mockValue, nil).AnyTimes()
+	mockClient.EXPECT().Get(gomock.Any(), gomock.Eq(mockKeys[1])).Return(mockValue, nil).AnyTimes()
+
+	// Test for action "count"
+	t.Run("action=count", func(t *testing.T) {
+		// Create a mock response writer.
+		w := httptest.NewRecorder()
+
+		// Mock request with action=count query parameter.
+		req, err := http.NewRequest("GET", "/?action=count", nil)
+		assert.NoError(t, err)
+
+		// Handle the request.
+		handleGET(w, req, mockClient)
+
+		// Assert that the response status code is 200.
+		assert.Equal(t, http.StatusOK, w.Result().StatusCode)
+	})
+
+	// Test for action "all"
+	t.Run("action=all", func(t *testing.T) {
+		// Create a mock response writer.
+		w := httptest.NewRecorder()
+
+		// Mock request with action=all query parameter.
+		req, err := http.NewRequest("GET", "/?action=all", nil)
+		assert.NoError(t, err)
+
+		// Handle the request.
+		handleGET(w, req, mockClient)
+
+		// Assert that the response status code is 200.
+		assert.Equal(t, http.StatusOK, w.Result().StatusCode)
+	})
+
+	// Test for action "random"
+	t.Run("action=random", func(t *testing.T) {
+		// Create a mock response writer.
+		w := httptest.NewRecorder()
+
+		// Mock request with action=random query parameter.
+		req, err := http.NewRequest("GET", "/?action=random", nil)
+		assert.NoError(t, err)
+
+		// Handle the request.
+		handleGET(w, req, mockClient)
+
+		// Assert that the response status code is 200.
+		assert.Equal(t, http.StatusOK, w.Result().StatusCode)
+	})
+
+	// Test for no action (defaults to "random")
+	t.Run("no action", func(t *testing.T) {
+		// Create a mock response writer.
+		w := httptest.NewRecorder()
+
+		// Mock request without any action query parameter.
+		req, err := http.NewRequest("GET", "/", nil)
+		assert.NoError(t, err)
+
+		// Handle the request.
+		handleGET(w, req, mockClient)
+
+		// Assert that the response status code is 200.
+		assert.Equal(t, http.StatusOK, w.Result().StatusCode)
+	})
+}
+
+// Returns internal server error if client is nil or clientPool is empty
+func TestHandleGET_InternalServerError(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	// Create a mock client.
+	mockClient := NewMockRawKVClientInterface(ctrl)
+
+	// Set up a common expectation for the Scan method
+	mockKeys := [][]byte{[]byte("key1"), []byte("key2")}
+	mockClient.EXPECT().Scan(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(mockKeys, nil, nil).AnyTimes()
+
+	// Set up an expectation for the Get method for the "all" action
+	mockValue := []byte("value1")
+	mockClient.EXPECT().Get(gomock.Any(), gomock.Eq(mockKeys[0])).Return(mockValue, nil).AnyTimes()
+	mockClient.EXPECT().Get(gomock.Any(), gomock.Eq(mockKeys[1])).Return(mockValue, nil).AnyTimes()
+
+	// Test for action "count"
+	t.Run("action=count", func(t *testing.T) {
+		// Create a mock response writer.
+		w := httptest.NewRecorder()
+
+		// Mock request with action=count query parameter.
+		req, err := http.NewRequest("GET", "/?action=count", nil)
+		assert.NoError(t, err)
+
+		// Handle the request.
+		handleGET(w, req, mockClient)
+
+		// Assert that the response status code is 200.
+		assert.Equal(t, http.StatusOK, w.Result().StatusCode)
+	})
+
+	// Test for action "all"
+	t.Run("action=all", func(t *testing.T) {
+		// Create a mock response writer.
+		w := httptest.NewRecorder()
+
+		// Mock request with action=all query parameter.
+		req, err := http.NewRequest("GET", "/?action=all", nil)
+		assert.NoError(t, err)
+
+		// Handle the request.
+		handleGET(w, req, mockClient)
+
+		// Assert that the response status code is 200.
+		assert.Equal(t, http.StatusOK, w.Result().StatusCode)
+	})
+
+	// Test for action "random"
+	t.Run("action=random", func(t *testing.T) {
+		// Create a mock response writer.
+		w := httptest.NewRecorder()
+
+		// Mock request with action=random query parameter.
+		req, err := http.NewRequest("GET", "/?action=random", nil)
+		assert.NoError(t, err)
+
+		// Handle the request.
+		handleGET(w, req, mockClient)
+
+		// Assert that the response status code is 200.
+		assert.Equal(t, http.StatusOK, w.Result().StatusCode)
+	})
+
+	// Test for no action (defaults to "random")
+	t.Run("no action", func(t *testing.T) {
+		// Create a mock response writer.
+		w := httptest.NewRecorder()
+
+		// Mock request without any action query parameter.
+		req, err := http.NewRequest("GET", "/", nil)
+		assert.NoError(t, err)
+
+		// Handle the request.
+		handleGET(w, req, mockClient)
+
+		// Assert that the response status code is 200.
+		assert.Equal(t, http.StatusOK, w.Result().StatusCode)
+	})
+}
+
+// Returns bad request error if action parameter is not recognized
+func TestHandleGET_ValidAction(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	// Create a mock client.
+	mockClient := NewMockRawKVClientInterface(ctrl)
+
+	// Set up a common expectation for the Scan method
+	mockKeys := [][]byte{[]byte("key1"), []byte("key2")}
+	mockClient.EXPECT().Scan(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(mockKeys, nil, nil).AnyTimes()
+
+	// Set up an expectation for the Get method for the "all" action
+	mockValue := []byte("value1")
+	mockClient.EXPECT().Get(gomock.Any(), gomock.Eq(mockKeys[0])).Return(mockValue, nil).AnyTimes()
+	mockClient.EXPECT().Get(gomock.Any(), gomock.Eq(mockKeys[1])).Return(mockValue, nil).AnyTimes()
+
+	// Test for action "count"
+	t.Run("action=count", func(t *testing.T) {
+		// Create a mock response writer.
+		w := httptest.NewRecorder()
+
+		// Mock request with action=count query parameter.
+		req, err := http.NewRequest("GET", "/?action=count", nil)
+		assert.NoError(t, err)
+
+		// Handle the request.
+		handleGET(w, req, mockClient)
+
+		// Assert that the response status code is 200.
+		assert.Equal(t, http.StatusOK, w.Result().StatusCode)
+	})
+
+	// Test for action "all"
+	t.Run("action=all", func(t *testing.T) {
+		// Create a mock response writer.
+		w := httptest.NewRecorder()
+
+		// Mock request with action=all query parameter.
+		req, err := http.NewRequest("GET", "/?action=all", nil)
+		assert.NoError(t, err)
+
+		// Handle the request.
+		handleGET(w, req, mockClient)
+
+		// Assert that the response status code is 200.
+		assert.Equal(t, http.StatusOK, w.Result().StatusCode)
+	})
+
+	// Test for action "random"
+	t.Run("action=random", func(t *testing.T) {
+		// Create a mock response writer.
+		w := httptest.NewRecorder()
+
+		// Mock request with action=random query parameter.
+		req, err := http.NewRequest("GET", "/?action=random", nil)
+		assert.NoError(t, err)
+
+		// Handle the request.
+		handleGET(w, req, mockClient)
+
+		// Assert that the response status code is 200.
+		assert.Equal(t, http.StatusOK, w.Result().StatusCode)
+	})
+
+	// Test for no action (defaults to "random")
+	t.Run("no action", func(t *testing.T) {
+		// Create a mock response writer.
+		w := httptest.NewRecorder()
+
+		// Mock request without any action query parameter.
+		req, err := http.NewRequest("GET", "/", nil)
+		assert.NoError(t, err)
+
+		// Handle the request.
+		handleGET(w, req, mockClient)
+
+		// Assert that the response status code is 200.
+		assert.Equal(t, http.StatusOK, w.Result().StatusCode)
+	})
 }

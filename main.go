@@ -67,6 +67,7 @@ import (
 
 const ClientPoolSize = 10
 const DefaultMonitoringInterval = 30 * time.Second
+const LogFile = "tikvApi.log"
 
 var clientPool chan RawKVClientInterface
 var ctx = context.Background()
@@ -77,7 +78,7 @@ var security = config.Security{}
 // creates a pool of TiKV clients, and handles HTTP requests for retrieving, saving, and deleting blobs.
 // It uses the rawkv package to interact with TiKV.
 func main() {
-	setupLogging()
+	setupLogging(LogFile)
 	clientPool := setupClientPool(false) // not mock
 	setupMonitoring(clientPool)
 
@@ -119,7 +120,11 @@ func setupClientPool(useMock bool) chan RawKVClientInterface {
 }
 
 func getClientFromPool(clientPool chan RawKVClientInterface) RawKVClientInterface {
-	return <-clientPool
+	if len(clientPool) > 0 && cap(clientPool) > 0 {
+		return <-clientPool
+	} else {
+		return nil
+	}
 }
 
 // setupLogging initializes a new logger and returns it.
@@ -127,10 +132,11 @@ func getClientFromPool(clientPool chan RawKVClientInterface) RawKVClientInterfac
 // If the file does not exist, it will be created.
 // If the file already exists, new logs will be appended to the end of the file.
 // The logger uses the default logger flags for log entries.
-func setupLogging() *log.Logger {
-	logFile, err := os.OpenFile("tikvApi.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+func setupLogging(logname string) *log.Logger {
+	logFile, err := os.OpenFile(logname, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
-		log.Fatalf("Failed to open log file: %v", err)
+		log.Printf("Failed to open log file: %v", err)
+		return nil
 	}
 	return log.New(logFile, "", log.LstdFlags)
 }
@@ -154,9 +160,22 @@ func setupMonitoring(clientPool chan RawKVClientInterface, interval ...time.Dura
 // It also manages a pool of rawkv clients to handle the requests.
 func handleRequest(w http.ResponseWriter, r *http.Request, clientPool chan RawKVClientInterface) {
 	client := getClientFromPool(clientPool)
+
+	if client == nil || cap(clientPool) == 0 {
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		log.Println("Internal server error: clientPool empty")
+		return
+	}
+
 	defer func() {
 		clientPool <- client
 	}()
+
+	if clientPool == nil {
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		log.Println("Internal server error: clientPool empty")
+		return
+	}
 
 	switch r.Method {
 	case http.MethodGet:
