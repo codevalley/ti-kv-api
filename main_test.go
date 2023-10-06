@@ -505,6 +505,74 @@ func TestGetErrorHandlePUT(t *testing.T) {
 	// Assert that the response status code is 200.
 	assert.Equal(t, http.StatusInternalServerError, w.Result().StatusCode)
 }
+func TestScanErrorHandlePUT(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	// Create a mock response writer.
+	w := httptest.NewRecorder()
+
+	// Create a mock client.
+	mockClient := NewMockRawKVClientInterface(ctrl)
+
+	// Mock request with oldBlob and newBlob query parameters.
+	req, err := http.NewRequest("PUT", "/?oldBlob=oldValue&newBlob=newValue", nil)
+	assert.NoError(t, err)
+
+	// Mock the Scan method to return a slice of keys.
+	mockKeys := [][]byte{
+		[]byte("blob:1"),
+	}
+	mockClient.EXPECT().Scan(context.Background(), []byte("blob:"), []byte("blob:~"), 100).Return(mockKeys, nil, errors.New("Failed to scan"))
+
+	// Handle the request.
+	handlePUT(w, req, mockClient)
+
+	// Assert that the response status code is 200.
+	assert.Equal(t, http.StatusInternalServerError, w.Result().StatusCode)
+}
+
+func TestOldErrorHandlePUT(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	// Create a mock response writer.
+	w := httptest.NewRecorder()
+
+	// Create a mock client.
+	mockClient := NewMockRawKVClientInterface(ctrl)
+
+	// Mock request with oldBlob and newBlob query parameters.
+	req, err := http.NewRequest("PUT", "/?newBlob=newValue", nil)
+	assert.NoError(t, err)
+
+	// Handle the request.
+	handlePUT(w, req, mockClient)
+
+	// Assert that the response status code is 200.
+	assert.Equal(t, http.StatusBadRequest, w.Result().StatusCode)
+}
+
+func TestNewErrorHandlePUT(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	// Create a mock response writer.
+	w := httptest.NewRecorder()
+
+	// Create a mock client.
+	mockClient := NewMockRawKVClientInterface(ctrl)
+
+	// Mock request with oldBlob and newBlob query parameters.
+	req, err := http.NewRequest("PUT", "/?oldBlob=newValue", nil)
+	assert.NoError(t, err)
+
+	// Handle the request.
+	handlePUT(w, req, mockClient)
+
+	// Assert that the response status code is 200.
+	assert.Equal(t, http.StatusBadRequest, w.Result().StatusCode)
+}
 
 func TestInvalidRequestMethod(t *testing.T) {
 	ctrl := gomock.NewController(t)
@@ -559,6 +627,47 @@ func TestCountBlobs(t *testing.T) {
 	// Check the result
 	if count != len(mockKeys) {
 		t.Errorf("Expected count to be %d, but got %d", len(mockKeys), count)
+	}
+}
+
+func TestCountBlobsScanError(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	// Create a mock client
+	mockClient := NewMockRawKVClientInterface(ctrl)
+
+	// Mock the Scan method to return a slice of keys
+	mockKeys := [][]byte{
+		[]byte("blob:1"),
+		[]byte("blob:2"),
+		[]byte("blob:3"),
+	}
+	mockClient.EXPECT().Scan(context.Background(), []byte("blob:"), []byte("blob:~"), 100).Return(mockKeys, nil, errors.New("Failed to scan"))
+
+	// Replace the global clientPool with a channel that returns the mock client
+	clientPool = make(chan RawKVClientInterface, 1)
+	clientPool <- mockClient
+
+	// Call the function
+	count := countBlobs(mockClient)
+
+	// Check the result
+	if count != -1 {
+		t.Errorf("Expected count to be -1, but got %d", count)
+	}
+}
+
+func TestCountBlobsClientError(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	// Call the function
+	count := countBlobs(nil)
+
+	// Check the result
+	if count != -1 {
+		t.Errorf("Expected count to be -1, but got %d", count)
 	}
 }
 
@@ -1471,6 +1580,60 @@ func TestHandleGETAll(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Result().StatusCode)
 }
 
+func TestHandleGETAllError(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	// Create a mock client.
+	mockClient := NewMockRawKVClientInterface(ctrl)
+
+	// Set up a common expectation for the Scan method
+	mockKeys := [][]byte{[]byte("key1"), []byte("key2")}
+	mockClient.EXPECT().Scan(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(mockKeys, nil, nil).AnyTimes()
+
+	// Set up an expectation for the Get method for the "all" action
+	mockValue := []byte("value1")
+	mockClient.EXPECT().Get(gomock.Any(), gomock.Eq(mockKeys[0])).Return(mockValue, errors.New("blob not found")).AnyTimes()
+
+	// Create a mock response writer.
+	w := httptest.NewRecorder()
+
+	// Mock request with action=all query parameter.
+	req, err := http.NewRequest("GET", "/?action=all", nil)
+	assert.NoError(t, err)
+
+	// Handle the request.
+	handleGET(w, req, mockClient)
+
+	// Assert that the response status code is 200.
+	assert.Equal(t, http.StatusInternalServerError, w.Result().StatusCode)
+}
+
+func TestHandleGETAllErrorEmpty(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	// Create a mock client.
+	mockClient := NewMockRawKVClientInterface(ctrl)
+
+	// Set up a common expectation for the Scan method
+	mockKeys := [][]byte{}
+	mockClient.EXPECT().Scan(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(mockKeys, nil, nil).AnyTimes()
+
+	// Create a mock response writer.
+	w := httptest.NewRecorder()
+
+	// Mock request with action=all query parameter.
+	req, err := http.NewRequest("GET", "/?action=all", nil)
+	assert.NoError(t, err)
+
+	// Handle the request.
+	handleGET(w, req, mockClient)
+
+	// Assert that the response status code is 200.
+	assert.Equal(t, http.StatusNotFound, w.Result().StatusCode)
+}
+
 // Handles other actions by calling handleGETRandom with client
 func TestHandleGETRandom(t *testing.T) {
 	ctrl := gomock.NewController(t)
@@ -1500,6 +1663,56 @@ func TestHandleGETRandom(t *testing.T) {
 
 	// Assert that the response status code is 200.
 	assert.Equal(t, http.StatusOK, w.Result().StatusCode)
+}
+
+func TestHandleGETRandomEmpty(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	// Create a mock client.
+	mockClient := NewMockRawKVClientInterface(ctrl)
+
+	// Set up a common expectation for the Scan method
+	mockKeys := [][]byte{}
+	mockClient.EXPECT().Scan(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(mockKeys, nil, nil).AnyTimes()
+
+	// Create a mock response writer.
+	w := httptest.NewRecorder()
+
+	// Mock request with action=random query parameter.
+	req, err := http.NewRequest("GET", "/?action=random", nil)
+	assert.NoError(t, err)
+
+	// Handle the request.
+	handleGET(w, req, mockClient)
+
+	// Assert that the response status code is 200.
+	assert.Equal(t, http.StatusNotFound, w.Result().StatusCode)
+}
+
+func TestHandleGETRandomScanError(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	// Create a mock client.
+	mockClient := NewMockRawKVClientInterface(ctrl)
+
+	// Set up a common expectation for the Scan method
+	mockKeys := [][]byte{}
+	mockClient.EXPECT().Scan(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(mockKeys, nil, errors.New("Failed to retreive blobs")).AnyTimes()
+
+	// Create a mock response writer.
+	w := httptest.NewRecorder()
+
+	// Mock request with action=random query parameter.
+	req, err := http.NewRequest("GET", "/?action=random", nil)
+	assert.NoError(t, err)
+
+	// Handle the request.
+	handleGET(w, req, mockClient)
+
+	// Assert that the response status code is 200.
+	assert.Equal(t, http.StatusInternalServerError, w.Result().StatusCode)
 }
 
 // Handles empty action parameter by calling handleGETRandom with client
