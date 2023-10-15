@@ -158,7 +158,7 @@ func TestHandleRequest(t *testing.T) {
 		w := httptest.NewRecorder()
 
 		// Mock request with HTTP PUT method.
-		req, err := http.NewRequest(http.MethodPut, "/?oldBlob=randomValue&newBlob=newBlobValue", nil)
+		req, err := http.NewRequest(http.MethodPut, "/randomValue?newBlob=newBlobValue", nil)
 		assert.NoError(t, err)
 
 		// Handle the request.
@@ -383,7 +383,7 @@ func TestHandlePUT(t *testing.T) {
 	mockClient := NewMockRawKVClientInterface(ctrl)
 
 	// Mock request with oldBlob and newBlob query parameters.
-	req, err := http.NewRequest("PUT", "/?oldBlob=oldValue&newBlob=newValue", nil)
+	req, err := http.NewRequest("PUT", "/oldValue?newBlob=newValue", nil)
 	assert.NoError(t, err)
 
 	// Mock the Scan method to return a slice of keys.
@@ -424,7 +424,7 @@ func TestPutErrorHandlePUT(t *testing.T) {
 	mockClient := NewMockRawKVClientInterface(ctrl)
 
 	// Mock request with oldBlob and newBlob query parameters.
-	req, err := http.NewRequest("PUT", "/?oldBlob=oldValue&newBlob=newValue", nil)
+	req, err := http.NewRequest("PUT", "/oldValue?newBlob=newValue", nil)
 	assert.NoError(t, err)
 
 	// Mock the Scan method to return a slice of keys.
@@ -459,7 +459,7 @@ func TestMatchErrorHandlePUT(t *testing.T) {
 	mockClient := NewMockRawKVClientInterface(ctrl)
 
 	// Mock request with oldBlob and newBlob query parameters.
-	req, err := http.NewRequest("PUT", "/?oldBlob=oldValue&newBlob=newValue", nil)
+	req, err := http.NewRequest("PUT", "/oldValue?newBlob=newValue", nil)
 	assert.NoError(t, err)
 
 	// Mock the Scan method to return a slice of keys.
@@ -488,7 +488,7 @@ func TestGetErrorHandlePUT(t *testing.T) {
 	mockClient := NewMockRawKVClientInterface(ctrl)
 
 	// Mock request with oldBlob and newBlob query parameters.
-	req, err := http.NewRequest("PUT", "/?oldBlob=oldValue&newBlob=newValue", nil)
+	req, err := http.NewRequest("PUT", "/oldValue?newBlob=newValue", nil)
 	assert.NoError(t, err)
 
 	// Mock the Scan method to return a slice of keys.
@@ -516,7 +516,7 @@ func TestScanErrorHandlePUT(t *testing.T) {
 	mockClient := NewMockRawKVClientInterface(ctrl)
 
 	// Mock request with oldBlob and newBlob query parameters.
-	req, err := http.NewRequest("PUT", "/?oldBlob=oldValue&newBlob=newValue", nil)
+	req, err := http.NewRequest("PUT", "/oldValue?newBlob=newValue", nil)
 	assert.NoError(t, err)
 
 	// Mock the Scan method to return a slice of keys.
@@ -1599,7 +1599,7 @@ func TestHandleGETAllError(t *testing.T) {
 	w := httptest.NewRecorder()
 
 	// Mock request with action=all query parameter.
-	req, err := http.NewRequest("GET", "/?action=all", nil)
+	req, err := http.NewRequest("GET", "/all", nil)
 	assert.NoError(t, err)
 
 	// Handle the request.
@@ -1806,7 +1806,7 @@ func TestHandleGETLogsActionParameter(t *testing.T) {
 		w := httptest.NewRecorder()
 
 		// Mock request with action=count query parameter.
-		req, err := http.NewRequest("GET", "/?action=count", nil)
+		req, err := http.NewRequest("GET", "/count", nil)
 		assert.NoError(t, err)
 
 		// Handle the request.

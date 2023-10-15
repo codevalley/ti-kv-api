@@ -189,11 +189,11 @@ func handleRequest(w http.ResponseWriter, r *http.Request, clientPool chan RawKV
 
 // Further break down each HTTP method handler into its own function, e.g.:
 func handleGET(w http.ResponseWriter, r *http.Request, client RawKVClientInterface) {
-	action := r.URL.Query().Get("action")
-	log.Printf("Action: %v", action)
-	if action == "count" {
+	action := r.URL.Path
+	log.Printf("GET action: %v", action)
+	if action == "/count" {
 		handleGETCount(w, client)
-	} else if action == "all" {
+	} else if action == "/all" {
 		handleGETAll(w, r, client)
 	} else {
 		handleGETRandom(w, r, client)
@@ -207,7 +207,10 @@ func handlePOST(w http.ResponseWriter, r *http.Request, client RawKVClientInterf
 		log.Println("No blob provided")
 		return
 	}
+	insertBlob(w, r, client, blob)
+}
 
+func insertBlob(w http.ResponseWriter, r *http.Request, client RawKVClientInterface, blob string) {
 	// Check if the blob already exists
 	keys, _, err := client.Scan(r.Context(), []byte("blob:"), []byte("blob:~"), 100)
 	if err != nil {
@@ -303,7 +306,7 @@ func handleDELETE(w http.ResponseWriter, r *http.Request, client RawKVClientInte
 }
 
 func handlePUT(w http.ResponseWriter, r *http.Request, client RawKVClientInterface) {
-	oldBlob := r.URL.Query().Get("oldBlob")
+	oldBlob := r.URL.Path[1:]
 	if oldBlob == "" {
 		http.Error(w, "No old blob provided", http.StatusBadRequest)
 		log.Println("No old blob provided")
@@ -311,8 +314,7 @@ func handlePUT(w http.ResponseWriter, r *http.Request, client RawKVClientInterfa
 	}
 	newBlob := r.URL.Query().Get("newBlob")
 	if newBlob == "" {
-		http.Error(w, "No new blob provided", http.StatusBadRequest)
-		log.Println("No new blob provided")
+		insertBlob(w, r, client, oldBlob)
 		return
 	}
 
